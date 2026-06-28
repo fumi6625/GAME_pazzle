@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ルミナス風パズル</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="title">
+      <h1>LUMINA</h1>
+      <p class="subtitle">ルミナス風パズル</p>
+    </header>
+
+    <div class="layout">
+      <!-- ゲーム盤面 -->
+      <div class="board-wrap">
+        <canvas id="board" width="512" height="320"></canvas>
+
+        <!-- ゲームオーバー表示 -->
+        <div id="overlay" class="overlay hidden">
+          <div class="overlay-inner">
+            <p id="overlay-title">GAME OVER</p>
+            <p id="overlay-score">SCORE: 0</p>
+            <p class="overlay-hint">R キーでリスタート</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- サイドパネル -->
+      <aside class="panel">
+        <div class="panel-box">
+          <span class="label">SCORE</span>
+          <span id="score" class="value">0</span>
+        </div>
+        <div class="panel-box">
+          <span class="label">最大コンボ</span>
+          <span id="max-combo" class="value">0</span>
+        </div>
+        <div class="panel-box">
+          <span class="label">NEXT</span>
+          <canvas id="next" width="80" height="80"></canvas>
+        </div>
+
+        <div class="controls">
+          <h2>操作方法</h2>
+          <ul>
+            <li><kbd>←</kbd> <kbd>→</kbd> 移動</li>
+            <li><kbd>↑</kbd> 回転</li>
+            <li><kbd>↓</kbd> 高速落下</li>
+            <li><kbd>Space</kbd> 一気に落とす</li>
+            <li><kbd>R</kbd> リスタート</li>
+            <li><kbd>P</kbd> 一時停止</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="hint">
+      同じ色を 2×2 にそろえると、左から流れる<strong>タイムライン</strong>が通過したときに消えます。
+    </footer>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
