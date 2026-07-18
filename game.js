@@ -1,13 +1,14 @@
 /*
- * LUMINA ARISE — ルミナス風パズル（演出・音楽・BURST 搭載）
+ * LUMINA ARISE — ルミナス風パズル（演出・音楽・BURST 搭載）v2
  * HTML + Canvas + Web Audio（ビルド不要）
  *
  * ゲームの流れ:
  *  - 2色の 2x2 ブロックが落下（←→移動 / ↑回転 / ↓落下 / Space ハードドロップ）
  *  - 同色が 2x2 の正方形になると「消去待ち」フラグ
  *  - タイムライン（音楽に同期して左→右）が通過した列でフラグ付きセルを消去
- *  - 連続スイープで消し続けると COMBO 倍率アップ、3個以上で BONUS
+ *  - 連続スイープで消し続けると COMBO 倍率アップ、大量消しで BONUS
  *  - 消去でたまる BURST ゲージ満タン時に Enter → 大量消去の必殺演出
+ *  - コンボ・盤面の高さに応じて BGM のレイヤーが増減（ダイナミックミュージック）
  */
 
 // ===== 定数 =====
@@ -20,8 +21,8 @@ const COLOR_A = 1;
 const COLOR_B = 2;
 
 const COLORS = {
-  [COLOR_A]: { base: "#2f7bff", light: "#7fb2ff", glow: "#4f9bff" },
-  [COLOR_B]: { base: "#ff3ea5", light: "#ff8fd0", glow: "#ff5cc0" },
+  [COLOR_A]: { base: "#1b3fbf", light: "#3f8bff", core: "#bfe3ff", glow: "#57b1ff" },
+  [COLOR_B]: { base: "#c31677", light: "#ff4fae", core: "#ffd2ec", glow: "#ff6ec7" },
 };
 
 const GRAVITY_INTERVAL = 620;   // ms: ピース落下
@@ -35,10 +36,10 @@ let score, squaresCleared, combo, maxCombo;
 let burstGauge, burstReady;
 let gameOver, paused, running, softDrop;
 let startTimeMs, elapsedMs;
+let dangerLevel = 0;            // 0..1 盤面の危険度（赤ビネット）
 
-let timelineCol;        // 現在のタイムライン列（-1..COLS-1）
-let timelineBeat;       // 累積ビート（音楽同期）
-let clearedThisSweep;
+let timelineCol;
+let timelineBeat;
 
 let gravityTimer, lastTime;
 
@@ -72,6 +73,70 @@ function randomCells() {
 function cellCenter(x, y) {
   return { cx: x * CELL + CELL / 2, cy: y * CELL + CELL / 2 };
 }
+function colPan(x) { return (x / (COLS - 1)) * 1.6 - 0.8; }
+
+// ===== ブロックスプライト（ガラス質の宝石ブロックを事前描画） =====
+const spriteCache = {};
+function roundRectPath(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+function blockSprite(color, size) {
+  const key = color + "_" + size;
+  if (spriteCache[key]) return spriteCache[key];
+  const s = document.createElement("canvas");
+  s.width = s.height = size;
+  const c = s.getContext("2d");
+  const col = COLORS[color];
+  const pad = 2, r = size * 0.2;
+
+  // 本体: 左上から光が差すラジアルグラデ
+  const g = c.createRadialGradient(size * 0.32, size * 0.26, 2, size * 0.5, size * 0.6, size * 0.85);
+  g.addColorStop(0, col.core);
+  g.addColorStop(0.4, col.light);
+  g.addColorStop(1, col.base);
+  roundRectPath(c, pad, pad, size - pad * 2, size - pad * 2, r);
+  c.fillStyle = g;
+  c.fill();
+
+  // 底面の陰影
+  const g2 = c.createLinearGradient(0, size * 0.55, 0, size);
+  g2.addColorStop(0, "rgba(0,0,0,0)");
+  g2.addColorStop(1, "rgba(5,0,25,0.4)");
+  roundRectPath(c, pad, pad, size - pad * 2, size - pad * 2, r);
+  c.fillStyle = g2;
+  c.fill();
+
+  // ガラスの艶（上部ハイライト）
+  const g3 = c.createLinearGradient(0, pad, 0, size * 0.46);
+  g3.addColorStop(0, "rgba(255,255,255,0.6)");
+  g3.addColorStop(1, "rgba(255,255,255,0.02)");
+  roundRectPath(c, pad + 3, pad + 2.5, size - pad * 2 - 6, size * 0.36, r * 0.7);
+  c.fillStyle = g3;
+  c.fill();
+
+  // 内側の輝点
+  const g4 = c.createRadialGradient(size * 0.3, size * 0.3, 0, size * 0.3, size * 0.3, size * 0.22);
+  g4.addColorStop(0, "rgba(255,255,255,0.5)");
+  g4.addColorStop(1, "rgba(255,255,255,0)");
+  c.fillStyle = g4;
+  c.fillRect(0, 0, size, size);
+
+  // 縁
+  roundRectPath(c, pad + 0.5, pad + 0.5, size - pad * 2 - 1, size - pad * 2 - 1, r);
+  c.strokeStyle = "rgba(255,255,255,0.25)";
+  c.lineWidth = 1;
+  c.stroke();
+
+  spriteCache[key] = s;
+  return s;
+}
 
 // ===== 初期化 =====
 function init() {
@@ -88,12 +153,14 @@ function init() {
   softDrop = false;
   timelineCol = -1;
   timelineBeat = 0;
-  clearedThisSweep = false;
+  sweepCleared = 0;
   gravityTimer = 0;
   elapsedMs = 0;
+  dangerLevel = 0;
   startTimeMs = performance.now();
   nextPiece = randomCells();
   Effects.reset();
+  GameAudio.setIntensity(1);
   spawnPiece();
   updateHud();
   overOverlay.classList.add("hidden");
@@ -154,14 +221,18 @@ function lockPiece() {
     }
   }
   GameAudio.playLock(current.x);
+  // 着地の小さな煙
+  const { cx, cy } = cellCenter(current.x + 0.5, current.y + 1.5);
+  Effects.burst(cx, cy + CELL * 0.4, "rgba(180,200,255,0.8)", 5, 0.4);
   current = null;
   settleColumns();
   const had = markMatches();
   if (had) GameAudio.playSquare();
+  updateIntensity();
   spawnPiece();
 }
 
-// ===== 重力（列詰め） =====
+// ===== 重力（全列詰め） =====
 function settleColumns() {
   for (let x = 0; x < COLS; x++) {
     let write = ROWS - 1;
@@ -215,16 +286,15 @@ function settleColumn(x) {
 // ===== タイムライン進行（音楽同期・本家準拠） =====
 // 1列 = 8分音符。マークは「通過するまで」保持され、通過列だけ消去・落下する。
 // スコア/COMBO は 1スイープ単位で確定させる。
-let sweepCleared = 0; // 現スイープで消したセル数
+let sweepCleared = 0;
 
 function advanceTimeline() {
   timelineCol++;
 
-  // スイープ完了（右端を越えた）→ 集計と再マッチ
+  // スイープ完了 → 集計と再マッチ
   if (timelineCol >= COLS) {
     timelineCol = -1;
     resolveSweep();
-    // 落下してできた新しいスクエアを次スイープ用に付け直す
     settleColumns();
     markMatches();
     return;
@@ -238,19 +308,23 @@ function advanceTimeline() {
       board[y][c] = EMPTY;
     }
   }
-  // この列は処理済み：残マークを消し、列内だけ落下
   for (let y = 0; y < ROWS; y++) marked[y][c] = false;
 
   if (cleared.length > 0) {
     sweepCleared += cleared.length;
-    // 演出＋音（消えたセルが音階で旋律になる）
+    // 演出: 破片 + グロー粒 + リング + 光柱、音は列位置パン付きベル
+    const pan = colPan(c);
     cleared.forEach((cell, i) => {
       const { cx, cy } = cellCenter(c, cell.y);
-      Effects.burst(cx, cy, COLORS[cell.color].light, 12, 1);
-      Effects.ring(cx, cy, COLORS[cell.color].glow, CELL * 1.6);
-      GameAudio.playClear(i, cell.y);
+      const col = COLORS[cell.color];
+      Effects.shatter(cx, cy, col.light, 6, 1);
+      Effects.burst(cx, cy, col.glow, 8, 0.9);
+      Effects.ring(cx, cy, col.glow, CELL * 1.5);
+      GameAudio.playClear(i, cell.y, pan);
     });
-    Effects.screenFlash(0.12 + Math.min(0.35, sweepCleared * 0.03));
+    Effects.column(c * CELL + CELL / 2, CELL, ROWS * CELL,
+      "rgba(190,225,255,ALPHA)");
+    Effects.screenFlash(0.1 + Math.min(0.3, sweepCleared * 0.025));
 
     // BURST ゲージ
     if (!burstReady) {
@@ -272,7 +346,7 @@ function resolveSweep() {
 
     const mult = Math.min(16, Math.pow(2, combo - 1)); // x1,x2,x4,x8,x16
     let pts = sweepCleared * 10 * mult;
-    if (sweepCleared >= 8) pts += 100; // 大量消しBONUS
+    if (sweepCleared >= 8) pts += 100;
     score += pts;
 
     if (combo >= 2) {
@@ -286,7 +360,24 @@ function resolveSweep() {
     combo = 0;
   }
   sweepCleared = 0;
+  updateIntensity();
   updateHud();
+}
+
+// ===== 音楽レイヤー制御（ゲーム状況 → BGMの厚み） =====
+function stackHeight() {
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++)
+      if (board[y][x] !== EMPTY) return ROWS - y;
+  return 0;
+}
+function updateIntensity() {
+  const h = stackHeight();
+  let lvl = 1;
+  if (combo >= 2 || burstReady || h >= 5) lvl = 2;
+  if (combo >= 4 || h >= 7) lvl = 3;
+  GameAudio.setIntensity(lvl);
+  dangerLevel = Math.max(0, Math.min(1, (h - 6) / 3));
 }
 
 // ===== BURST 発動 =====
@@ -295,14 +386,12 @@ function triggerBurst() {
   burstReady = false;
   burstGauge = 0;
 
-  // 現在マーク中の全セル ＋ 各色の最大クラスタ的に "同色隣接" を一気消し
-  // シンプルに: 盤上で最も多い色のセルを一定割合消す + マーク中は全消し
   let cells = [];
   for (let y = 0; y < ROWS; y++)
     for (let x = 0; x < COLS; x++)
       if (marked[y][x] && board[y][x] !== EMPTY) cells.push({ x, y, color: board[y][x] });
 
-  // 追加で、盤面下部の密集を薙ぎ払う（BURST の"ピンチ脱出"）
+  // 盤面下部の密集を薙ぎ払う（ピンチ脱出）
   for (let y = ROWS - 1; y >= ROWS - 4; y--) {
     for (let x = 0; x < COLS; x++) {
       if (board[y][x] !== EMPTY && !cells.find((c) => c.x === x && c.y === y)) {
@@ -312,7 +401,6 @@ function triggerBurst() {
   }
 
   if (cells.length === 0) {
-    // マーク・下段が無ければ全消し量を確保（最低限の見返り）
     for (let y = 0; y < ROWS; y++)
       for (let x = 0; x < COLS; x++)
         if (board[y][x] !== EMPTY) cells.push({ x, y, color: board[y][x] });
@@ -322,20 +410,23 @@ function triggerBurst() {
     board[c.y][c.x] = EMPTY;
     marked[c.y][c.x] = false;
     const { cx, cy } = cellCenter(c.x, c.y);
-    Effects.burst(cx, cy, COLORS[c.color].light, 18, 1.6);
+    const col = COLORS[c.color];
+    Effects.shatter(cx, cy, col.light, 8, 1.8);
+    Effects.burst(cx, cy, col.glow, 12, 1.6);
     Effects.ring(cx, cy, "#ffffff", CELL * 2);
   });
 
   score += cells.length * 30;
-  squaresCleared += Math.round(cells.length / 4 * 10) / 10;
+  squaresCleared += cells.length / 4;
 
-  Effects.screenFlash(0.85);
-  Effects.screenShake(10);
+  Effects.screenFlash(0.9);
+  Effects.screenShake(12);
   Effects.popup(canvas.width / 2, canvas.height / 2 - 20, "BURST!", "#ff5cf0", true);
   GameAudio.playBurst();
 
   settleColumns();
   markMatches();
+  updateIntensity();
   updateHud();
 }
 
@@ -356,51 +447,27 @@ function endGame() {
   gameOver = true;
   current = null;
   GameAudio.playGameOver();
+  GameAudio.setIntensity(0);
   Effects.screenShake(8);
   overScoreEl.textContent = "SCORE: " + score + "  /  MAX COMBO: " + maxCombo;
   overOverlay.classList.remove("hidden");
 }
 
 // ===== 描画 =====
-function roundRect(c, x, y, w, h, r) {
-  c.beginPath();
-  c.moveTo(x + r, y);
-  c.arcTo(x + w, y, x + w, y + h, r);
-  c.arcTo(x + w, y + h, x, y + h, r);
-  c.arcTo(x, y + h, x, y, r);
-  c.arcTo(x, y, x + w, y, r);
-  c.closePath();
-}
-
 function drawCell(c, x, y, color, size, opts = {}) {
-  const col = COLORS[color];
-  const px = x * size, py = y * size;
-  const pad = 2;
-  c.save();
+  c.drawImage(blockSprite(color, size), x * size, y * size);
   if (opts.marked) {
-    c.shadowColor = col.glow;
-    c.shadowBlur = 16;
-  }
-  const grad = c.createLinearGradient(px, py, px, py + size);
-  grad.addColorStop(0, col.light);
-  grad.addColorStop(0.5, col.base);
-  grad.addColorStop(1, col.base);
-  c.fillStyle = grad;
-  roundRect(c, px + pad, py + pad, size - pad * 2, size - pad * 2, 6);
-  c.fill();
-  c.restore();
-
-  // ハイライト
-  c.fillStyle = "rgba(255,255,255,0.28)";
-  roundRect(c, px + pad + 2, py + pad + 2, size - pad * 2 - 4, 5, 3);
-  c.fill();
-
-  // マーク中は白枠パルス
-  if (opts.marked) {
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 120);
-    c.strokeStyle = `rgba(255,255,255,${0.4 + pulse * 0.5})`;
+    // 消去待ち: 白枠 + グローのパルス
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 110);
+    const px = x * size, py = y * size, pad = 2;
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    c.globalAlpha = 0.25 + pulse * 0.3;
+    c.drawImage(blockSprite(color, size), px, py);
+    c.restore();
+    c.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.5})`;
     c.lineWidth = 2;
-    roundRect(c, px + pad + 1, py + pad + 1, size - pad * 2 - 2, size - pad * 2 - 2, 5);
+    roundRectPath(c, px + pad + 1, py + pad + 1, size - pad * 2 - 2, size - pad * 2 - 2, size * 0.16);
     c.stroke();
   }
 }
@@ -411,19 +478,15 @@ function render() {
   ctx.save();
   ctx.translate(shk.x, shk.y);
 
-  // 盤面枠内うっすら
-  ctx.fillStyle = "rgba(10,14,30,0.35)";
+  // 盤面のうっすら暗幕
+  ctx.fillStyle = "rgba(8,10,26,0.42)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // グリッド
-  ctx.strokeStyle = "rgba(255,255,255,0.05)";
-  ctx.lineWidth = 1;
-  for (let x = 0; x <= COLS; x++) {
-    ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, ROWS * CELL); ctx.stroke();
-  }
-  for (let y = 0; y <= ROWS; y++) {
-    ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(COLS * CELL, y * CELL); ctx.stroke();
-  }
+  // グリッド（微細ドット）
+  ctx.fillStyle = "rgba(255,255,255,0.06)";
+  for (let x = 1; x < COLS; x++)
+    for (let y = 1; y < ROWS; y++)
+      ctx.fillRect(x * CELL - 1, y * CELL - 1, 2, 2);
 
   // セル
   for (let y = 0; y < ROWS; y++)
@@ -431,8 +494,20 @@ function render() {
       if (board[y][x] !== EMPTY)
         drawCell(ctx, x, y, board[y][x], CELL, { marked: marked[y][x] });
 
-  // 落下ピース
+  // 落下ピース（着地予測のゴースト付き）
   if (current) {
+    let gy = current.y;
+    while (!collides(current.x, gy + 1, current.cells)) gy++;
+    if (gy !== current.y) {
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      for (let r = 0; r < 2; r++)
+        for (let c = 0; c < 2; c++) {
+          const by = gy + r;
+          if (by >= 0) drawCell(ctx, current.x + c, by, current.cells[r][c], CELL);
+        }
+      ctx.restore();
+    }
     for (let r = 0; r < 2; r++)
       for (let c = 0; c < 2; c++) {
         const by = current.y + r;
@@ -440,28 +515,48 @@ function render() {
       }
   }
 
-  // タイムライン（音楽同期の連続位置で滑らかに）
+  // タイムライン（音楽同期 + 尾を引く光）
   if (running && !gameOver) {
-    const frac = timelineBeat * 2 % 1; // 8分の途中位置
+    const frac = timelineBeat * 2 % 1;
     const colf = timelineCol + frac;
     if (colf >= 0 && colf < COLS) {
       const tx = colf * CELL;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const g = ctx.createLinearGradient(tx - 16, 0, tx + 16, 0);
-      g.addColorStop(0, "rgba(53,200,255,0)");
-      g.addColorStop(0.5, "rgba(53,200,255,0.35)");
-      g.addColorStop(1, "rgba(53,200,255,0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(tx - 16, 0, 32, ROWS * CELL);
-      ctx.fillStyle = "#8fe3ff";
-      ctx.fillRect(tx - 1.5, 0, 3, ROWS * CELL);
+      // 尾（左側に減衰するグラデ）
+      const tail = ctx.createLinearGradient(tx - 90, 0, tx, 0);
+      tail.addColorStop(0, "rgba(90,190,255,0)");
+      tail.addColorStop(1, "rgba(120,210,255,0.22)");
+      ctx.fillStyle = tail;
+      ctx.fillRect(tx - 90, 0, 90, ROWS * CELL);
+      // コアライン
+      const core = ctx.createLinearGradient(tx - 5, 0, tx + 5, 0);
+      core.addColorStop(0, "rgba(160,230,255,0)");
+      core.addColorStop(0.5, "rgba(235,250,255,0.95)");
+      core.addColorStop(1, "rgba(160,230,255,0)");
+      ctx.fillStyle = core;
+      ctx.fillRect(tx - 5, 0, 10, ROWS * CELL);
+      // 先端の輝き
+      ctx.fillStyle = "rgba(200,240,255,0.5)";
+      ctx.fillRect(tx - 1, 0, 2, ROWS * CELL);
       ctx.restore();
     }
   }
 
   // パーティクル等
   Effects.drawForeground(ctx, canvas.width, canvas.height);
+
+  // 危険時の赤ビネット
+  if (dangerLevel > 0 && !gameOver) {
+    const throb = 0.6 + 0.4 * Math.sin(performance.now() / 180);
+    const g = ctx.createRadialGradient(
+      canvas.width / 2, canvas.height / 2, canvas.height * 0.35,
+      canvas.width / 2, canvas.height / 2, canvas.height * 0.75);
+    g.addColorStop(0, "rgba(255,30,60,0)");
+    g.addColorStop(1, `rgba(255,30,60,${0.22 * dangerLevel * throb})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   // 一時停止
   if (paused && !gameOver && running) {
@@ -483,15 +578,8 @@ function drawNext() {
   const offX = (nextCanvas.width - size * 2) / 2;
   const offY = (nextCanvas.height - size * 2) / 2;
   for (let r = 0; r < 2; r++)
-    for (let c = 0; c < 2; c++) {
-      const col = COLORS[nextPiece[r][c]];
-      const grad = nextCtx.createLinearGradient(0, offY + r * size, 0, offY + r * size + size);
-      grad.addColorStop(0, col.light);
-      grad.addColorStop(1, col.base);
-      nextCtx.fillStyle = grad;
-      roundRect(nextCtx, offX + c * size + 2, offY + r * size + 2, size - 4, size - 4, 6);
-      nextCtx.fill();
-    }
+    for (let c = 0; c < 2; c++)
+      nextCtx.drawImage(blockSprite(nextPiece[r][c], size), offX + c * size, offY + r * size);
 }
 
 // ===== 背景リサイズ =====
@@ -509,8 +597,9 @@ function loop(now) {
 
   const beat = GameAudio.beatPhase();
 
-  // 背景（常時）
-  Effects.drawBackground(bgCtx, bgCanvas.width, bgCanvas.height, dt, beat);
+  // 背景（常時・ビート連動）
+  Effects.drawBackground(bgCtx, bgCanvas.width, bgCanvas.height, dt, beat,
+    running && !gameOver ? 2 : 1);
 
   if (running && !gameOver && !paused) {
     elapsedMs = now - startTimeMs;
@@ -576,13 +665,11 @@ window.LUMINA = {
   get score() { return score; },
   get combo() { return combo; },
   get burstReady() { return burstReady; },
-  // 盤面を指定パターンで直接セット（テスト専用）
   setBoard(grid) {
     board = grid.map((row) => row.slice());
     markMatches();
     updateHud();
   },
-  // 1スイープ分タイムラインを端まで走らせる（同期・即時）
   runSweep() {
     timelineCol = -1;
     for (let i = 0; i <= COLS; i++) advanceTimeline();
@@ -595,7 +682,6 @@ window.LUMINA = {
 resizeBg();
 running = false;
 lastTime = performance.now();
-// 開始前でも背景を見せるため board も一度描画
 board = makeGrid(EMPTY);
 marked = makeGrid(false);
 current = null;
