@@ -3,65 +3,101 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ルミナス風パズル</title>
+  <title>LUMINA ARISE — ルミナス風パズル</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="title">
-      <h1>LUMINA</h1>
-      <p class="subtitle">ルミナス風パズル</p>
-    </header>
+  <div class="stage">
+    <!-- 背景（ビート連動エフェクト） -->
+    <canvas id="bg" class="bg-canvas"></canvas>
 
-    <div class="layout">
-      <!-- ゲーム盤面 -->
-      <div class="board-wrap">
-        <canvas id="board" width="512" height="320"></canvas>
+    <div class="game-area">
+      <header class="topbar">
+        <h1 class="logo">LUMINA<span>ARISE</span></h1>
+      </header>
 
-        <!-- ゲームオーバー表示 -->
-        <div id="overlay" class="overlay hidden">
-          <div class="overlay-inner">
-            <p id="overlay-title">GAME OVER</p>
-            <p id="overlay-score">SCORE: 0</p>
-            <p class="overlay-hint">R キーでリスタート</p>
+      <div class="layout">
+        <!-- 左：ステータス -->
+        <aside class="hud hud-left">
+          <div class="stat big">
+            <span class="stat-label">SCORE</span>
+            <span id="score" class="stat-value">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">2×2 SQUARES</span>
+            <span id="squares" class="stat-value">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">TIME</span>
+            <span id="time" class="stat-value">0:00</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">COMBO</span>
+            <span id="combo" class="stat-value">0</span>
+          </div>
+
+          <div class="burst-wrap">
+            <span class="stat-label">BURST</span>
+            <div class="burst-bar"><div id="burst-fill" class="burst-fill"></div></div>
+            <span id="burst-ready" class="burst-ready hidden">READY! [Enter]</span>
+          </div>
+        </aside>
+
+        <!-- 中央：盤面 -->
+        <div class="board-wrap">
+          <canvas id="board" width="640" height="400"></canvas>
+
+          <!-- スタート画面 -->
+          <div id="start" class="overlay">
+            <div class="overlay-inner">
+              <p class="overlay-title">LUMINA ARISE</p>
+              <p class="overlay-sub">ルミナス風・音と光のパズル</p>
+              <button id="start-btn" class="start-btn">▶ START</button>
+              <p class="overlay-hint">クリック / Space で開始（音が鳴ります）</p>
+            </div>
+          </div>
+
+          <!-- ゲームオーバー -->
+          <div id="over" class="overlay hidden">
+            <div class="overlay-inner">
+              <p class="overlay-title over">GAME OVER</p>
+              <p id="over-score" class="overlay-sub">SCORE: 0</p>
+              <button id="retry-btn" class="start-btn">▶ RETRY</button>
+              <p class="overlay-hint">R キーでも再挑戦</p>
+            </div>
           </div>
         </div>
+
+        <!-- 右：NEXT と操作 -->
+        <aside class="hud hud-right">
+          <div class="stat">
+            <span class="stat-label">NEXT</span>
+            <canvas id="next" width="96" height="96"></canvas>
+          </div>
+          <div class="controls">
+            <h2>操作</h2>
+            <ul>
+              <li><kbd>←</kbd><kbd>→</kbd> 移動</li>
+              <li><kbd>↑</kbd> 回転</li>
+              <li><kbd>↓</kbd> 落下</li>
+              <li><kbd>Space</kbd> 一気に落下</li>
+              <li><kbd>Enter</kbd> BURST</li>
+              <li><kbd>P</kbd> 一時停止</li>
+              <li><kbd>R</kbd> リスタート</li>
+              <li><kbd>M</kbd> ミュート</li>
+            </ul>
+          </div>
+        </aside>
       </div>
 
-      <!-- サイドパネル -->
-      <aside class="panel">
-        <div class="panel-box">
-          <span class="label">SCORE</span>
-          <span id="score" class="value">0</span>
-        </div>
-        <div class="panel-box">
-          <span class="label">最大コンボ</span>
-          <span id="max-combo" class="value">0</span>
-        </div>
-        <div class="panel-box">
-          <span class="label">NEXT</span>
-          <canvas id="next" width="80" height="80"></canvas>
-        </div>
-
-        <div class="controls">
-          <h2>操作方法</h2>
-          <ul>
-            <li><kbd>←</kbd> <kbd>→</kbd> 移動</li>
-            <li><kbd>↑</kbd> 回転</li>
-            <li><kbd>↓</kbd> 高速落下</li>
-            <li><kbd>Space</kbd> 一気に落とす</li>
-            <li><kbd>R</kbd> リスタート</li>
-            <li><kbd>P</kbd> 一時停止</li>
-          </ul>
-        </div>
-      </aside>
+      <footer class="foot">
+        同色を <strong>2×2</strong> にそろえ、流れる<strong>タイムライン</strong>で消去。連続で <strong>COMBO</strong>、ゲージ満タンで <strong>BURST</strong> 大量消去！
+      </footer>
     </div>
-
-    <footer class="hint">
-      同じ色を 2×2 にそろえると、左から流れる<strong>タイムライン</strong>が通過したときに消えます。
-    </footer>
   </div>
 
+  <script src="effects.js"></script>
+  <script src="audio.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
