@@ -127,6 +127,7 @@ function checkLevelUp() {
     for (let i = 0; i < 3; i++)
       Effects.ring(canvas.width / 2, canvas.height / 2, "#7fffd4", canvas.width * (0.4 + i * 0.25));
     GameAudio.playLevelUp(level);
+    padRumble(0.5, 0.6, 260);
   }
 }
 
@@ -171,6 +172,7 @@ function findBigBlocks() {
       Effects.popup(cx, cy - CELL, n + "×" + n + " GRAND", "#ffe27a", true);
       Effects.screenFlash(0.3);
       GameAudio.playGrand(n);
+      padRumble(0.45, 0.5, 200);
     }
   }
 }
@@ -555,6 +557,7 @@ function lockPiece() {
     }
   }
   GameAudio.playLock(current.x);
+  padRumble(0, 0.22, 55);
   // 着地の小さな煙
   const { cx, cy } = cellCenter(current.x + 0.5, current.y + 1.5);
   Effects.burst(cx, cy + CELL * 0.4, "rgba(180,200,255,0.8)", 5, 0.4);
@@ -681,6 +684,7 @@ function advanceTimeline() {
     Effects.column(c * CELL + CELL / 2, CELL, ROWS * CELL,
       "rgba(190,225,255,ALPHA)");
     Effects.screenFlash(0.1 + Math.min(0.3, sweepCleared * 0.025));
+    padRumble(0.12 + Math.min(0.4, cleared.length * 0.07), 0.3, 70);
 
     // BURST ゲージ
     if (!burstReady) {
@@ -759,6 +763,7 @@ function updateIntensity() {
 function onBurstReady() {
   GameAudio.playBurstReady();
   Effects.setBurstReady(true);
+  padRumble(0.6, 0.7, 300);
 
   // 見逃しようのないインパクト: 衝撃波・フラッシュ・文字
   const cx = canvas.width / 2, cy = canvas.height / 2;
@@ -826,6 +831,7 @@ function triggerBurst() {
     cells.length + " BLOCKS CLEARED", "#ffd2ec");
   Effects.scorePop(canvas.width / 2, canvas.height / 2 + 64, "+" + pts, "#ff8cf5", 2.0);
   GameAudio.playBurst();
+  padRumble(1, 0.9, 420);
 
   settleColumns();
   markMatches();
@@ -862,6 +868,7 @@ function endGame() {
   current = null;
   GameAudio.playGameOver();
   GameAudio.setIntensity(0);
+  padRumble(0.8, 0.4, 700);
   Effects.setBurstReady(false);
   Effects.screenShake(8);
 
@@ -1058,6 +1065,8 @@ function loop(now) {
   const dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
 
+  pollPad(dt * 1000);
+
   const beat = GameAudio.beatPhase();
 
   // 背景（常時・ビート連動）
@@ -1069,7 +1078,7 @@ function loop(now) {
 
     // 重力
     gravityTimer += dt * 1000;
-    const gi = softDrop ? SOFT_DROP_INTERVAL : gravityInterval();
+    const gi = (softDrop || padSoftDrop) ? SOFT_DROP_INTERVAL : gravityInterval();
     if (gravityTimer >= gi) { gravityTimer = 0; if (current) stepDown(); }
 
     // タイムライン（音楽ビートで進行: 1列 = 8分音符）
@@ -1095,6 +1104,142 @@ function startGame() {
   running = true;
   init();
 }
+
+// ===== ゲームパッド（Gamepad API / 標準マッピング） =====
+// Xbox・PlayStation・汎用パッドの "standard" マッピングを前提にしつつ、
+// 左スティックでも操作できるようにする。押しっぱなしの左右は DAS/ARR でリピート。
+const PAD_DEADZONE = 0.45;
+const PAD_UP_THRESHOLD = 0.75;  // スティック上は誤爆しやすいので深めに倒す必要あり
+const PAD_DAS = 170;            // ms: リピート開始までの溜め
+const PAD_ARR = 55;             // ms: リピート間隔
+
+// 標準マッピングのボタン番号
+//  0:A/×  1:B/○  2:X/□  3:Y/△  4:LB/L1  5:RB/R1  6:LT/L2  7:RT/R2
+//  8:View/Share  9:Menu/Options  12:↑  13:↓  14:←  15:→
+const PAD_MAP = {
+  rotate:   [0, 3, 4, 5],
+  hardDrop: [1, 12],
+  softDrop: [13],
+  left:     [14],
+  right:    [15],
+  burst:    [2, 6, 7],
+  pause:    [9],
+  restart:  [8],
+};
+
+let padIndex = null;
+let padPrev = {};
+let padDir = 0, padDasTimer = 0, padArrAcc = 0;
+let padSoftDrop = false;
+const padStatusEl = document.getElementById("pad-status");
+
+function padGet() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  if (padIndex !== null && pads[padIndex] && pads[padIndex].connected) return pads[padIndex];
+  for (let i = 0; i < pads.length; i++) {
+    if (pads[i] && pads[i].connected) { padIndex = i; return pads[i]; }
+  }
+  padIndex = null;
+  return null;
+}
+
+function padDown(gp, action) {
+  for (const b of PAD_MAP[action] || []) {
+    const btn = gp.buttons[b];
+    if (btn && (typeof btn === "object" ? btn.pressed : btn > 0.5)) return true;
+  }
+  const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
+  if (action === "left" && ax < -PAD_DEADZONE) return true;
+  if (action === "right" && ax > PAD_DEADZONE) return true;
+  if (action === "softDrop" && ay > PAD_DEADZONE) return true;
+  if (action === "hardDrop" && ay < -PAD_UP_THRESHOLD) return true;
+  return false;
+}
+
+// 触覚フィードバック（対応パッドのみ）
+function padRumble(strong, weak, ms) {
+  const gp = padGet();
+  if (!gp || !gp.vibrationActuator) return;
+  try {
+    gp.vibrationActuator.playEffect("dual-rumble", {
+      duration: ms, startDelay: 0,
+      strongMagnitude: strong, weakMagnitude: weak,
+    });
+  } catch (e) { /* 未対応でも通常プレイに影響なし */ }
+}
+
+function updatePadStatus(gp) {
+  if (!padStatusEl) return;
+  const on = !!gp;
+  const label = on ? (gp.id || "CONNECTED").replace(/\s*\(.*\)\s*/g, "").slice(0, 20) : "未接続";
+  if (padStatusEl.textContent !== label) padStatusEl.textContent = label;
+  padStatusEl.classList.toggle("is-on", on);
+}
+
+function pollPad(dtMs) {
+  const gp = padGet();
+  updatePadStatus(gp);
+  if (!gp) { padSoftDrop = false; return; }
+
+  // 未開始／ゲームオーバー中はどのボタンでも開始・再挑戦
+  if (!running || gameOver) {
+    const any = gp.buttons.some((b) => b && (typeof b === "object" ? b.pressed : b > 0.5));
+    const wasAny = padPrev._any;
+    padPrev._any = any;
+    for (const k in PAD_MAP) padPrev[k] = padDown(gp, k);  // 開始直後の誤爆を防ぐ
+    if (any && !wasAny) {
+      if (!running) startGame();
+      else init();
+    }
+    return;
+  }
+  padPrev._any = gp.buttons.some((b) => b && (typeof b === "object" ? b.pressed : b > 0.5));
+
+  const edge = (a) => {
+    const now = padDown(gp, a);
+    const fired = now && !padPrev[a];
+    padPrev[a] = now;
+    return fired;
+  };
+
+  if (edge("rotate")) rotate();
+  if (edge("hardDrop")) hardDrop();
+  if (edge("burst")) triggerBurst();
+  if (edge("pause")) paused = !paused;
+  if (edge("restart")) init();
+
+  padSoftDrop = padDown(gp, "softDrop");
+  padPrev.softDrop = padSoftDrop;
+
+  // 左右: 押した瞬間に1マス → 溜めのあとリピート
+  const l = padDown(gp, "left"), r = padDown(gp, "right");
+  padPrev.left = l; padPrev.right = r;
+  const dir = l && !r ? -1 : r && !l ? 1 : 0;
+  if (dir !== padDir) {
+    padDir = dir;
+    padDasTimer = 0;
+    padArrAcc = 0;
+    if (dir && !paused) move(dir);
+  } else if (dir && !paused) {
+    padDasTimer += dtMs;
+    if (padDasTimer >= PAD_DAS) {
+      padArrAcc += dtMs;
+      while (padArrAcc >= PAD_ARR) { move(dir); padArrAcc -= PAD_ARR; }
+    }
+  }
+}
+
+window.addEventListener("gamepadconnected", (e) => {
+  padIndex = e.gamepad.index;
+  updatePadStatus(e.gamepad);
+  padRumble(0.4, 0.2, 160);   // 接続の合図
+});
+window.addEventListener("gamepaddisconnected", () => {
+  padIndex = null;
+  padPrev = {};
+  padSoftDrop = false;
+  updatePadStatus(null);
+});
 
 // ===== 入力 =====
 document.addEventListener("keydown", (e) => {
@@ -1139,6 +1284,10 @@ window.LUMINA = {
       for (let x = 0; x < COLS; x++) if (bigTop[y][x]) out.push({ x, y, n: bigTop[y][x] });
     return out;
   },
+  get paused() { return paused; },
+  pieceX() { return current ? current.x : null; },
+  pieceY() { return current ? current.y : null; },
+  pieceCells() { return current ? current.cells : null; },
   addScore(v) { score += v; checkLevelUp(); updateHud(); },
   endNow() { endGame(); },
   setBoard(grid) {

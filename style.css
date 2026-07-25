@@ -412,8 +412,52 @@ body {
   font-size: 11px;
   color: var(--dim);
 }
-.keys { flex: 0 0 74px; display: flex; gap: 3px; }
-.act { letter-spacing: 0.04em; }
+/* キー表記を1行目、パッド表記を2行目に置く（HUD幅が狭いため） */
+.controls li {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  align-items: center;
+  column-gap: 9px;
+  row-gap: 1px;
+}
+.keys { grid-column: 1; grid-row: 1; display: flex; gap: 3px; }
+.act { grid-column: 2; grid-row: 1; letter-spacing: 0.04em; }
+.pad {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-size: 8.5px;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  opacity: 0.75;
+  padding-bottom: 2px;
+}
+
+/* ===== ゲームパッドの接続状態 ===== */
+.pad-wrap { gap: 4px; }
+.pad-status {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pad-status::before {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  vertical-align: middle;
+}
+.pad-status.is-on { color: #7fffd4; }
+.pad-status.is-on::before {
+  background: #7fffd4;
+  box-shadow: 0 0 8px #7fffd4;
+  animation: pad-live 1.6s ease-in-out infinite alternate;
+}
+@keyframes pad-live { from { opacity: 0.45 } to { opacity: 1 } }
 
 kbd {
   display: inline-block;
