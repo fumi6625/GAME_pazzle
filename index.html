@@ -111,22 +111,38 @@
           <div class="stat pad-wrap">
             <span class="stat-label">GAMEPAD</span>
             <span id="pad-status" class="pad-status">未接続</span>
+            <button id="pad-config-btn" class="pad-cfg-btn">ボタン設定（C）</button>
           </div>
 
           <div class="controls">
             <span class="stat-label">CONTROLS</span>
             <ul>
-              <li><span class="keys"><kbd>←</kbd><kbd>→</kbd></span><span class="pad">十字 / Lスティック</span><span class="act">移動</span></li>
-              <li><span class="keys"><kbd>Space</kbd></span><span class="pad">A/× · Y/△ · L1 · R1</span><span class="act">回転</span></li>
-              <li><span class="keys"><kbd>↑</kbd></span><span class="pad">B/○ · 十字↑</span><span class="act">即落下</span></li>
-              <li><span class="keys"><kbd>↓</kbd></span><span class="pad">十字↓</span><span class="act">ソフトドロップ</span></li>
-              <li><span class="keys"><kbd>Enter</kbd></span><span class="pad">X/□ · L2 · R2</span><span class="act">BURST</span></li>
-              <li><span class="keys"><kbd>P</kbd></span><span class="pad">Menu/Options</span><span class="act">一時停止</span></li>
-              <li><span class="keys"><kbd>R</kbd></span><span class="pad">View/Share</span><span class="act">リスタート</span></li>
+              <li><span class="keys"><kbd>←</kbd><kbd>→</kbd></span><span class="pad" data-pad-hint="move"></span><span class="act">移動</span></li>
+              <li><span class="keys"><kbd>Space</kbd></span><span class="pad" data-pad-hint="rotate"></span><span class="act">回転</span></li>
+              <li><span class="keys"><kbd>↑</kbd></span><span class="pad" data-pad-hint="hardDrop"></span><span class="act">即落下</span></li>
+              <li><span class="keys"><kbd>↓</kbd></span><span class="pad" data-pad-hint="softDrop"></span><span class="act">ソフトドロップ</span></li>
+              <li><span class="keys"><kbd>Enter</kbd></span><span class="pad" data-pad-hint="burst"></span><span class="act">BURST</span></li>
+              <li><span class="keys"><kbd>P</kbd></span><span class="pad" data-pad-hint="pause"></span><span class="act">一時停止</span></li>
+              <li><span class="keys"><kbd>R</kbd></span><span class="pad" data-pad-hint="restart"></span><span class="act">リスタート</span></li>
               <li><span class="keys"><kbd>M</kbd></span><span class="pad">—</span><span class="act">ミュート</span></li>
             </ul>
           </div>
         </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- ゲームパッドのボタン設定（transform を持つ祖先を避けるため .stage の外に置く） -->
+  <div id="padcfg" class="overlay hidden">
+    <div class="overlay-inner cfg-inner">
+      <p class="overlay-kicker">GAMEPAD</p>
+      <p class="overlay-title cfg-title">ボタン設定</p>
+      <p id="cfg-pad" class="cfg-pad">未接続</p>
+      <ul id="cfg-list" class="cfg-list"></ul>
+      <p id="cfg-hint" class="cfg-hint"></p>
+      <div class="cfg-btns">
+        <button id="cfg-reset" class="start-btn ghost">既定に戻す</button>
+        <button id="cfg-close" class="start-btn">閉じる</button>
       </div>
     </div>
   </div>

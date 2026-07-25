@@ -119,9 +119,8 @@ function checkLevelUp() {
   }
   if (rose) {
     levelFlash = 1;
-    Effects.popup(canvas.width / 2, canvas.height / 2 - 70, "LEVEL " + level, "#7fffd4", true);
-    Effects.popup(canvas.width / 2, canvas.height / 2 - 18,
-      "SCORE x" + levelMult().toFixed(1) + "  /  SPEED UP", "#bfe9ff");
+    Effects.banner("LEVEL " + level, "#7fffd4",
+      "SCORE x" + levelMult().toFixed(1) + "  /  SPEED UP");
     Effects.screenFlash(0.45);
     Effects.screenShake(6);
     for (let i = 0; i < 3; i++)
@@ -169,7 +168,7 @@ function findBigBlocks() {
     if (n > bestBig) {
       bestBig = n;
       const { cx, cy } = cellCenter(x0 + (n - 1) / 2, y0 + (n - 1) / 2);
-      Effects.popup(cx, cy - CELL, n + "×" + n + " GRAND", "#ffe27a", true);
+      Effects.banner(n + "×" + n + " GRAND", "#ffe27a", "豪華コマ生成");
       Effects.screenFlash(0.3);
       GameAudio.playGrand(n);
       padRumble(0.45, 0.5, 200);
@@ -668,7 +667,7 @@ function advanceTimeline() {
     const colPts = Math.round(colBase * pendingMult * levelMult());
     const mid = cleared[Math.floor(cleared.length / 2)];
     const cc = cellCenter(c, mid.y);
-    const popScale = 0.85 + Math.min(1.3, combo * 0.22) + (colBig >= BIG_MIN ? 0.5 : 0);
+    const popScale = 0.6 + Math.min(0.7, combo * 0.12) + (colBig >= BIG_MIN ? 0.25 : 0);
     Effects.scorePop(cc.cx, cc.cy, "+" + colPts,
       colBig >= BIG_MIN ? "#ffe27a" : COLORS[mid.color].glow, popScale);
     // 演出: 破片 + グロー粒 + リング + 光柱、音は列位置パン付きベル
@@ -718,7 +717,7 @@ function resolveSweep() {
     // COMBO はコンボ段数に応じて派手さが増す
     if (combo >= 2) {
       const heat = Math.min(1, (combo - 1) / 5);
-      Effects.popup(canvas.width / 2, 64, "COMBO x" + combo, "#ffe27a", combo >= 4);
+      Effects.banner("COMBO x" + combo, "#ffe27a");
       Effects.screenFlash(0.12 + heat * 0.3);
       Effects.screenShake(2 + heat * 8);
       for (let i = 0; i < 1 + Math.min(4, combo); i++)
@@ -727,11 +726,8 @@ function resolveSweep() {
       GameAudio.playCombo(combo);
     }
     if (mult >= 4) {
-      Effects.popup(canvas.width / 2, canvas.height / 2, "BONUS x" + mult, "#7fffd4", true);
+      Effects.banner("BONUS x" + mult, "#7fffd4");
     }
-    // スイープ合計をまとめて中央に打ち出す（達成感）
-    Effects.scorePop(canvas.width / 2, canvas.height / 2 + 46, "+" + pts,
-      combo >= 3 ? "#ffe27a" : "#bfe9ff", 1.1 + Math.min(1.1, combo * 0.2));
 
     checkLevelUp();
   } else {
@@ -772,8 +768,7 @@ function onBurstReady() {
   Effects.burst(cx, cy, "#ff8cf5", 40, 2.2);
   Effects.screenFlash(0.55);
   Effects.screenShake(7);
-  Effects.popup(cx, cy - 40, "BURST READY", "#ff5cf0", true);
-  Effects.popup(cx, cy + 16, "PRESS ENTER", "#bfe9ff");
+  Effects.banner("BURST READY", "#ff5cf0", "PRESS ENTER / X · L2 · R2");
 }
 
 // ===== BURST 発動 =====
@@ -826,10 +821,7 @@ function triggerBurst() {
 
   Effects.screenFlash(0.9);
   Effects.screenShake(14);
-  Effects.popup(canvas.width / 2, canvas.height / 2 - 34, "BURST!", "#ff5cf0", true);
-  Effects.popup(canvas.width / 2, canvas.height / 2 + 22,
-    cells.length + " BLOCKS CLEARED", "#ffd2ec");
-  Effects.scorePop(canvas.width / 2, canvas.height / 2 + 64, "+" + pts, "#ff8cf5", 2.0);
+  Effects.banner("BURST!", "#ff5cf0", cells.length + " BLOCKS  /  +" + pts);
   GameAudio.playBurst();
   padRumble(1, 0.9, 420);
 
@@ -1053,10 +1045,33 @@ function drawNext() {
 }
 
 // ===== 背景リサイズ =====
+let boardRect = { x: 0, y: 0, w: 640, h: 400 };
+function measureBoard() {
+  const r = canvas.getBoundingClientRect();
+  boardRect = { x: r.left, y: r.top, w: r.width, h: r.height };
+}
+
+// 盤面の裏に暗幕を敷き、その外側へ滑らかに繋ぐ
+function dimBehindBoard(c) {
+  const r = boardRect;
+  if (!r.w) return;
+  const pad = 26;
+  c.save();
+  const g = c.createLinearGradient(0, r.y - pad, 0, r.y + r.h + pad);
+  g.addColorStop(0, "rgba(3,5,12,0)");
+  g.addColorStop(0.10, "rgba(3,5,12,0.80)");
+  g.addColorStop(0.90, "rgba(3,5,12,0.80)");
+  g.addColorStop(1, "rgba(3,5,12,0)");
+  c.fillStyle = g;
+  c.fillRect(r.x - pad, r.y - pad, r.w + pad * 2, r.h + pad * 2);
+  c.restore();
+}
+
 function resizeBg() {
   bgCanvas.width = window.innerWidth;
   bgCanvas.height = window.innerHeight;
   Effects.initBg(bgCanvas.width, bgCanvas.height);
+  measureBoard();
 }
 window.addEventListener("resize", resizeBg);
 
@@ -1072,8 +1087,11 @@ function loop(now) {
   // 背景（常時・ビート連動）
   Effects.drawBackground(bgCtx, bgCanvas.width, bgCanvas.height, dt, beat,
     running && !gameOver ? 2 : 1);
+  // 盤面の背後だけ都市を落とす（コマの可読性を最優先）
+  dimBehindBoard(bgCtx);
+  Effects.drawBanners(bgCtx, boardRect);
 
-  if (running && !gameOver && !paused) {
+  if (running && !gameOver && !paused && !padCfgOpen) {
     elapsedMs = now - startTimeMs;
 
     // 重力
@@ -1116,7 +1134,7 @@ const PAD_ARR = 55;             // ms: リピート間隔
 // 標準マッピングのボタン番号
 //  0:A/×  1:B/○  2:X/□  3:Y/△  4:LB/L1  5:RB/R1  6:LT/L2  7:RT/R2
 //  8:View/Share  9:Menu/Options  12:↑  13:↓  14:←  15:→
-const PAD_MAP = {
+const PAD_MAP_DEFAULT = {
   rotate:   [0, 3, 4, 5],
   hardDrop: [1, 12],
   softDrop: [13],
@@ -1126,6 +1144,50 @@ const PAD_MAP = {
   pause:    [9],
   restart:  [8],
 };
+
+// 設定画面に並べる順序と表示名
+const PAD_ACTIONS = [
+  { key: "left",     label: "移動（左）" },
+  { key: "right",    label: "移動（右）" },
+  { key: "rotate",   label: "回転" },
+  { key: "hardDrop", label: "即落下" },
+  { key: "softDrop", label: "ソフトドロップ" },
+  { key: "burst",    label: "BURST" },
+  { key: "pause",    label: "一時停止" },
+  { key: "restart",  label: "リスタート" },
+];
+
+// 標準マッピングのボタン名（Xbox / PlayStation 併記）
+const PAD_BTN_NAMES = [
+  "A / ×", "B / ○", "X / □", "Y / △", "L1 / LB", "R1 / RB", "L2 / LT", "R2 / RT",
+  "View / Share", "Menu / Options", "L3", "R3", "十字 ↑", "十字 ↓", "十字 ←", "十字 →", "Home",
+];
+const btnName = (i) => PAD_BTN_NAMES[i] || ("ボタン " + i);
+
+// ユーザーが変更した割り当ては localStorage に保存する
+const PADMAP_KEY = "lumina.arise.padmap.v1";
+function defaultPadMap() {
+  const m = {};
+  for (const k in PAD_MAP_DEFAULT) m[k] = PAD_MAP_DEFAULT[k].slice();
+  return m;
+}
+function loadPadMap() {
+  try {
+    const j = JSON.parse(localStorage.getItem(PADMAP_KEY));
+    if (j && typeof j === "object") {
+      const m = defaultPadMap();
+      for (const k in m) {
+        if (Array.isArray(j[k])) m[k] = j[k].filter((v) => Number.isInteger(v) && v >= 0 && v < 32);
+      }
+      return m;
+    }
+  } catch (e) { /* 壊れていたら既定に戻す */ }
+  return defaultPadMap();
+}
+function savePadMap() {
+  try { localStorage.setItem(PADMAP_KEY, JSON.stringify(padMap)); } catch (e) { /* 保存不可でも続行 */ }
+}
+let padMap = loadPadMap();
 
 let padIndex = null;
 let padPrev = {};
@@ -1144,7 +1206,7 @@ function padGet() {
 }
 
 function padDown(gp, action) {
-  for (const b of PAD_MAP[action] || []) {
+  for (const b of padMap[action] || []) {
     const btn = gp.buttons[b];
     if (btn && (typeof btn === "object" ? btn.pressed : btn > 0.5)) return true;
   }
@@ -1176,17 +1238,70 @@ function updatePadStatus(gp) {
   padStatusEl.classList.toggle("is-on", on);
 }
 
+// ===== ボタン割り当ての変更 =====
+let padBindWait = null;        // 待機中のアクション名
+let padCaptPrev = [];          // 取り込み用の前フレーム押下状態
+let padCfgOpen = false;
+
+// 押されたボタンを action に割り当てる。他のアクションと重複したら奪う。
+function assignButton(action, index) {
+  for (const k in padMap) {
+    padMap[k] = padMap[k].filter((v) => v !== index);
+    if (padMap[k].length === 0 && k !== action) {
+      // 空になったアクションは既定へ戻して操作不能を防ぐ
+      padMap[k] = PAD_MAP_DEFAULT[k].filter((v) => v !== index);
+    }
+  }
+  padMap[action] = [index];
+  savePadMap();
+  renderPadCfg();
+  renderControlHints();
+}
+
 function pollPad(dtMs) {
   const gp = padGet();
   updatePadStatus(gp);
   if (!gp) { padSoftDrop = false; return; }
+
+  // --- 割り当て変更の待機中: 押されたボタンを取り込む ---
+  if (padBindWait) {
+    for (let i = 0; i < gp.buttons.length; i++) {
+      const b = gp.buttons[i];
+      const now = b && (typeof b === "object" ? b.pressed : b > 0.5);
+      if (now && !padCaptPrev[i]) {
+        const act = padBindWait;
+        padBindWait = null;
+        assignButton(act, i);
+        break;
+      }
+    }
+    for (let i = 0; i < gp.buttons.length; i++) {
+      const b = gp.buttons[i];
+      padCaptPrev[i] = !!(b && (typeof b === "object" ? b.pressed : b > 0.5));
+    }
+    for (const k in padMap) padPrev[k] = padDown(gp, k);
+    padPrev._any = padCaptPrev.some(Boolean);
+    return;
+  }
+  for (let i = 0; i < gp.buttons.length; i++) {
+    const b = gp.buttons[i];
+    padCaptPrev[i] = !!(b && (typeof b === "object" ? b.pressed : b > 0.5));
+  }
+
+  // 設定画面を開いている間はゲーム操作を受け付けない
+  if (padCfgOpen) {
+    for (const k in padMap) padPrev[k] = padDown(gp, k);
+    padPrev._any = padCaptPrev.some(Boolean);
+    padSoftDrop = false;
+    return;
+  }
 
   // 未開始／ゲームオーバー中はどのボタンでも開始・再挑戦
   if (!running || gameOver) {
     const any = gp.buttons.some((b) => b && (typeof b === "object" ? b.pressed : b > 0.5));
     const wasAny = padPrev._any;
     padPrev._any = any;
-    for (const k in PAD_MAP) padPrev[k] = padDown(gp, k);  // 開始直後の誤爆を防ぐ
+    for (const k in padMap) padPrev[k] = padDown(gp, k);  // 開始直後の誤爆を防ぐ
     if (any && !wasAny) {
       if (!running) startGame();
       else init();
@@ -1229,9 +1344,83 @@ function pollPad(dtMs) {
   }
 }
 
+// ===== ボタン設定 UI =====
+const padCfgOverlay = document.getElementById("padcfg");
+const padCfgListEl = document.getElementById("cfg-list");
+const padCfgHintEl = document.getElementById("cfg-hint");
+const padCfgPadEl = document.getElementById("cfg-pad");
+
+function bindingLabel(action) {
+  const list = padMap[action] || [];
+  if (!list.length) return "未割り当て";
+  return list.map(btnName).join(" · ");
+}
+
+function renderPadCfg() {
+  if (!padCfgListEl) return;
+  padCfgListEl.innerHTML = "";
+  for (const a of PAD_ACTIONS) {
+    const li = document.createElement("li");
+    li.className = "cfg-row" + (padBindWait === a.key ? " is-wait" : "");
+
+    const name = document.createElement("span");
+    name.className = "cfg-act";
+    name.textContent = a.label;
+
+    const bind = document.createElement("span");
+    bind.className = "cfg-bind";
+    bind.textContent = padBindWait === a.key ? "ボタンを押してください…" : bindingLabel(a.key);
+
+    const btn = document.createElement("button");
+    btn.className = "cfg-change";
+    btn.textContent = padBindWait === a.key ? "キャンセル" : "変更";
+    btn.addEventListener("click", () => {
+      padBindWait = padBindWait === a.key ? null : a.key;
+      renderPadCfg();
+    });
+
+    li.append(name, bind, btn);
+    padCfgListEl.appendChild(li);
+  }
+  if (padCfgHintEl) {
+    padCfgHintEl.textContent = padBindWait
+      ? "割り当てたいボタンをコントローラーで押してください（Esc で取消）"
+      : "「変更」を押してから、割り当てたいボタンを押してください";
+  }
+  if (padCfgPadEl) {
+    const gp = padGet();
+    padCfgPadEl.textContent = gp
+      ? (gp.id || "接続中").replace(/\s*\(.*\)\s*/g, "")
+      : "コントローラーが未接続です（接続すると設定できます）";
+  }
+}
+
+// HUD の操作一覧をいまの割り当てで書き換える
+function renderControlHints() {
+  document.querySelectorAll("[data-pad-hint]").forEach((el) => {
+    const act = el.getAttribute("data-pad-hint");
+    el.textContent = act === "move"
+      ? bindingLabel("left") + " / " + bindingLabel("right") + " / Lスティック"
+      : bindingLabel(act);
+  });
+}
+
+function openPadCfg() {
+  padCfgOpen = true;
+  padBindWait = null;
+  if (padCfgOverlay) padCfgOverlay.classList.remove("hidden");
+  renderPadCfg();
+}
+function closePadCfg() {
+  padCfgOpen = false;
+  padBindWait = null;
+  if (padCfgOverlay) padCfgOverlay.classList.add("hidden");
+}
+
 window.addEventListener("gamepadconnected", (e) => {
   padIndex = e.gamepad.index;
   updatePadStatus(e.gamepad);
+  renderPadCfg();
   padRumble(0.4, 0.2, 160);   // 接続の合図
 });
 window.addEventListener("gamepaddisconnected", () => {
@@ -1239,10 +1428,24 @@ window.addEventListener("gamepaddisconnected", () => {
   padPrev = {};
   padSoftDrop = false;
   updatePadStatus(null);
+  renderPadCfg();
 });
 
 // ===== 入力 =====
 document.addEventListener("keydown", (e) => {
+  // 設定画面はゲームの状態に関係なく開閉できる
+  if (e.key === "Escape") {
+    if (padBindWait) { padBindWait = null; renderPadCfg(); }
+    else if (padCfgOpen) closePadCfg();
+    return;
+  }
+  if (e.key === "c" || e.key === "C") {
+    if (padCfgOpen) closePadCfg(); else openPadCfg();
+    e.preventDefault();
+    return;
+  }
+  if (padCfgOpen) return;   // 設定中はゲーム操作を止める
+
   if (!running) {
     if (e.key === " " || e.key === "Enter") { startGame(); e.preventDefault(); }
     return;
@@ -1317,4 +1520,20 @@ bigSize = makeGrid(0);
 bigTop = makeGrid(0);
 drawNext();
 renderRanking(startRankEl, loadRanking(), null);
+renderPadCfg();
+renderControlHints();
+{
+  const openBtn = document.getElementById("pad-config-btn");
+  if (openBtn) openBtn.addEventListener("click", openPadCfg);
+  const closeBtn = document.getElementById("cfg-close");
+  if (closeBtn) closeBtn.addEventListener("click", closePadCfg);
+  const resetBtn = document.getElementById("cfg-reset");
+  if (resetBtn) resetBtn.addEventListener("click", () => {
+    padMap = defaultPadMap();
+    padBindWait = null;
+    savePadMap();
+    renderPadCfg();
+    renderControlHints();
+  });
+}
 requestAnimationFrame(loop);

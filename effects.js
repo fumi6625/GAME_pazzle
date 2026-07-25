@@ -1,17 +1,18 @@
 /*
- * Effects v3 — 夜のメトロポリス × サイバースペース
+ * Effects v4 — 3D メトロポリスをドローンで駆け抜ける背景 + 前景エフェクト
  *
- * 背景レイヤー（奥→手前）:
- *   1. ほぼ黒の空グラデ + 星 + 遠景ボケ粒子
- *   2. 視差スカイライン 4 層（プリレンダー / 窓明かりを焼き込み）
- *   3. 大気遠近のヘイズ帯 + ネオンの滲み（ビートで脈動）
- *   4. 濡れた路面：スカイラインの反転反射 + 波紋バンド
- *   5. Rez 的ワイヤーフレーム地平（透視グリッド + 消失点線）
- *   6. 車のヘッドライト光跡 / 手前のボケ粒子
- *   7. 通行人シルエット（低解像度スプライトの拡大 = 被写界深度のボケ）
- *   8. ビネット + 走査ノイズ
+ * 背景は Canvas 2D 上の自前パースペクティブ投影による立体都市:
+ *   1. 空グラデ + 星（カメラのロールに追従）
+ *   2. 地面のワイヤーグリッド（Rez 的な「網の中」）
+ *   3. ビル群を直方体として投影。正面は窓テクスチャをアフィン変換で貼り、
+ *      側面は暗く落として立体化。稜線はビートで明滅し、屋上に航空障害灯。
+ *   4. z の周期で建物をリサイクルして無限に続く都市にする
+ *   5. 前方の霞 / 放射状スピードライン / 走査線 / カラーグレード
  *
- * 前景: ガラス片 / グロー粒子 / リング / 亀裂状の光柱 / 大型タイポ / フラッシュ
+ * カメラ(ドローン)は前進しながら左右に蛇行・上下に揺れ、旋回方向へバンクする。
+ *
+ * 前景: ガラス片 / グロー粒子 / リング / 亀裂状の光柱 / 加点フロート / フラッシュ
+ * バナー(COMBO/BONUS/LEVEL/BURST)はコマを隠さないよう盤面の外側に描く。
  */
 const Effects = (() => {
   "use strict";
@@ -132,11 +133,12 @@ const Effects = (() => {
 
   // 加点のフロート表示（消えた場所から数字が舞い上がる）
   const floats = [];
+  // コマを隠さないよう、速く上へ抜けて短く消える
   function scorePop(x, y, text, color, scale = 1) {
     floats.push({
       x, y, text, color, scale,
-      vx: (Math.random() - 0.5) * 46, vy: -74 - Math.random() * 34,
-      life: 0.95 + scale * 0.25, age: 0,
+      vx: (Math.random() - 0.5) * 30, vy: -132 - Math.random() * 40,
+      life: 0.62, age: 0,
     });
   }
 
@@ -198,6 +200,7 @@ const Effects = (() => {
       z.age += dt;
       if (z.age >= z.life) zones.splice(i, 1);
     }
+    updateBanners(dt);
     if (flash > 0) flash = Math.max(0, flash - dt * 2.4);
     if (shake > 0) shake = Math.max(0, shake - dt * 42);
   }
@@ -322,14 +325,14 @@ const Effects = (() => {
       ctx.save();
       ctx.translate(f.x, f.y);
       ctx.scale(sc, sc);
-      ctx.font = `800 26px "Helvetica Neue", Arial, system-ui, sans-serif`;
+      ctx.font = `800 19px "Helvetica Neue", Arial, system-ui, sans-serif`;
       ctx.globalAlpha = Math.min(1, t * 2.2);
       // 縁取りで背景に負けないようにする
-      ctx.lineWidth = 5;
-      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
       ctx.strokeText(f.text, 0, 0);
       ctx.shadowColor = f.color;
-      ctx.shadowBlur = 20;
+      ctx.shadowBlur = 12;
       ctx.fillStyle = "#ffffff";
       ctx.fillText(f.text, 0, 0);
       ctx.shadowBlur = 0;
@@ -381,340 +384,302 @@ const Effects = (() => {
   }
 
   // =========================================================================
-  //  背景：夜のメトロポリス × ワイヤーフレーム
+  //  背景：3D メトロポリスをドローンで駆け抜ける
+  //
+  //  実装は Canvas 2D 上の自前パースペクティブ投影。
+  //   - ビル群を直方体としてワールド座標に配置し、z の周期でリサイクル（無限都市）
+  //   - カメラ(ドローン)は前進しながら左右に蛇行・上下に揺れ、旋回方向へバンクする
+  //   - 遠景はフォグで空に溶かし、近景ほど窓・稜線がはっきり出る
+  //   - 面はプリレンダーした窓テクスチャをアフィン変換で貼る（毎フレームの点描を回避）
   // =========================================================================
-  const HORIZON = 0.66;
 
-  // セクション別のトーン。BGM の section() が返す 0..4 に 1:1 対応させ、
-  // シーンが「別物」に見えるレベルで配色・密度・カメラを振り分ける。
-  //   0=イントロ(静寂の青) 1=ビルド(マゼンタに紅潮) 2=ドロップ(ネオン爆発)
-  //   3=ブレイク(深い霧の藍) 4=ラストドロップ(白熱の金)
+  // セクション別のトーン。BGM の section() が返す 0..4 に 1:1 対応させる。
   // Rez Infinite Area 1 の実測に準拠:
   //   明色の色相は 赤(0-30°) 63.6% / 桃 8.3% / シアン・青 19%、平均輝度 0.133 と極端に暗い。
   //   色相の推移は シアン(205°) → 赤(10-18°)が本編の大半 → 緑(136°) → 桃(346°) → 青(245°)。
-  //   これを 0..4 のセクションにそのまま割り当て、錆びた赤を主役に据える。
+  //   dens=光量/密度, cam=ドローンの機動の激しさ, grid=前進速度の倍率
   const SECTIONS = [
-    // 0 イントロ: 冷たいシアン（Rez の導入部 205°）
-    { accent: [72, 186, 255], sub: [255, 96, 72], warm: [170, 214, 255], sky: [3, 7, 14],  dens: 0.70, cam: 0.35, grid: 0.55 },
+    // 0 イントロ: 冷たいシアン（Rez の導入部 205°）。低速でゆったり巡航
+    { accent: [72, 186, 255], sub: [255, 96, 72], warm: [170, 214, 255], sky: [3, 7, 14],  dens: 0.70, cam: 0.40, grid: 0.55 },
     // 1 ビルド: 赤へ傾く琥珀（30-40°）
-    { accent: [255, 146, 52], sub: [90, 190, 255], warm: [255, 198, 140], sky: [12, 6, 6],  dens: 1.10, cam: 0.75, grid: 1.00 },
-    // 2 ドロップ: 錆びた赤 = 本編の支配色（12°）
-    { accent: [255, 68, 44], sub: [64, 208, 255], warm: [255, 150, 110], sky: [14, 4, 4],   dens: 1.65, cam: 1.35, grid: 1.85 },
-    // 3 ブレイク: 翠（136-159°）
-    { accent: [56, 240, 168], sub: [255, 92, 72], warm: [170, 255, 214], sky: [2, 10, 9],   dens: 0.50, cam: 0.22, grid: 0.35 },
-    // 4 ラストドロップ: 桃(346°) と 青(245°) が混ざる終盤
-    { accent: [255, 74, 150], sub: [96, 120, 255], warm: [255, 176, 208], sky: [10, 4, 14], dens: 2.00, cam: 1.70, grid: 2.30 },
+    { accent: [255, 146, 52], sub: [90, 190, 255], warm: [255, 198, 140], sky: [12, 6, 6],  dens: 1.10, cam: 0.85, grid: 1.00 },
+    // 2 ドロップ: 錆びた赤 = 本編の支配色（12°）。低空を高速で突っ切る
+    { accent: [255, 68, 44], sub: [64, 208, 255], warm: [255, 150, 110], sky: [14, 4, 4],   dens: 1.65, cam: 1.45, grid: 1.90 },
+    // 3 ブレイク: 翠（136-159°）。上空へ抜けて静まる
+    { accent: [56, 240, 168], sub: [255, 92, 72], warm: [170, 255, 214], sky: [2, 10, 9],   dens: 0.50, cam: 0.28, grid: 0.38 },
+    // 4 ラストドロップ: 桃(346°) と 青(245°) が混ざる終盤。最高速
+    { accent: [255, 74, 150], sub: [96, 120, 255], warm: [255, 176, 208], sky: [10, 4, 14], dens: 2.00, cam: 1.85, grid: 2.40 },
   ];
 
   let bgW = 0, bgH = 0, bgInit = false;
+  let halfW = 0, halfH = 0;
   let time = 0, prevBeat = 0, beatCount = 0, barPulse = 0;
-  let horizonY = 0, tileW = 0;
-  const layers = [];        // スカイライン各層
   const stars = [];
-  const bokehFar = [], bokehNear = [];
-  const trails = [];        // 路面の光跡
-  const peds = [];          // 通行人
-  let pedSprites = [];
   let curAccent = SECTIONS[0].accent.slice();
   let curSub = SECTIONS[0].sub.slice();
   let curSky = SECTIONS[0].sky.slice();
-  let curDens = 1;
-  let curCam = 0.35, curGrid = 0.55;   // カメラの振れ幅 / グリッド流速
+  let curDens = 1, curCam = 0.4, curGrid = 0.55;
   let prevSecId = -1;
-  let secFlash = 0;                    // セクション転換の閃光
-  let burstReadyOn = false;            // BURST 準備完了の常時演出
-  let burstReadyT = 0;
-  let gridScroll = 0;
-  let backdrop = null, backdropKey = "";
+  let secFlash = 0;
+  let burstReadyOn = false, burstReadyT = 0;
 
-  // 層の仕様（奥→手前）
-  const LAYER_SPECS = [
-    { haze: 0.62, speed: 3.5, hMul: 0.30, wMin: 22, wMax: 62, step: 5, win: 1, alpha: 0.85, dyn: 10 },
-    { haze: 0.38, speed: 8, hMul: 0.44, wMin: 30, wMax: 86, step: 6, win: 1, alpha: 0.92, dyn: 18 },
-    { haze: 0.17, speed: 16, hMul: 0.60, wMin: 44, wMax: 116, step: 8, win: 2, alpha: 1.0, dyn: 26 },
-    { haze: 0.03, speed: 29, hMul: 0.84, wMin: 66, wMax: 168, step: 11, win: 3, alpha: 1.0, dyn: 34 },
-  ];
+  // ===== ドローン（カメラ） =====
+  const FOCAL = 560;          // 焦点距離（小さいほど広角＝ドローンらしい画角）
+  const CITY_DEPTH = 4200;    // z 方向の周期
+  const LANE_HALF = 430;      // 中央通路の半幅（ここを縫うように飛ぶ）
+  const NEAR_FADE = 520;      // これより近い建物は溶けて消える（壁になるのを防ぐ）
+  const FAR = 3600;           // 描画する最遠 z
+  const BASE_SPEED = 420;     // 前進速度 (unit/s)
+  const N_BUILDINGS = 190;
+  const WIN_W = 26, WIN_H = 32;   // 窓1つのワールドサイズ（建物ごとに枚数が変わる）
 
-  // --- 通行人シルエットのプリレンダー（低解像度→拡大でボケを得る）---
-  function buildPedSprites() {
-    pedSprites = [];
-    const W = 26, H = 62;
-    for (let f = 0; f < 6; f++) {
-      const cv = makeCanvas(W, H), c = cv.getContext("2d");
-      const sw = Math.sin((f / 6) * TAU);        // 脚の開き
-      const aw = Math.sin((f / 6) * TAU + Math.PI); // 腕の振り
-      c.fillStyle = "#000";
-      const cx = W / 2;
-      c.beginPath(); c.arc(cx, 8, 5.4, 0, TAU); c.fill();       // 頭
-      c.beginPath();                                             // 胴
-      c.moveTo(cx - 7, 16); c.quadraticCurveTo(cx, 12.5, cx + 7, 16);
-      c.lineTo(cx + 5.5, 36); c.lineTo(cx - 5.5, 36); c.closePath(); c.fill();
-      c.lineCap = "round"; c.strokeStyle = "#000";
-      c.lineWidth = 4.4;                                         // 腕
-      c.beginPath(); c.moveTo(cx - 6, 18); c.lineTo(cx - 6 + aw * 5, 33); c.stroke();
-      c.beginPath(); c.moveTo(cx + 6, 18); c.lineTo(cx + 6 - aw * 5, 33); c.stroke();
-      c.lineWidth = 5.6;                                         // 脚
-      c.beginPath(); c.moveTo(cx - 2.5, 35); c.lineTo(cx - 2.5 + sw * 7, 60); c.stroke();
-      c.beginPath(); c.moveTo(cx + 2.5, 35); c.lineTo(cx + 2.5 - sw * 7, 60); c.stroke();
-      pedSprites.push(cv);
-    }
+  let camZ = 0, camX = 0, camY = 215, camRoll = 0;
+  let camXPrev = 0;
+
+  const buildings = [];
+  function makeBuilding(z) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const w = 70 + Math.random() * 150;
+    const d = 70 + Math.random() * 150;
+    return {
+      x: side * (LANE_HALF + w * 0.5 + Math.random() * 1500),
+      z, w, d,
+      // 低層を多めに、たまに超高層（分布に偏りを付ける）
+      h: 140 + Math.pow(Math.random(), 1.7) * 1050,
+      variant: (Math.random() * 6) | 0,
+      lit: 0.25 + Math.random() * 0.5,
+      spire: Math.random() < 0.22,
+    };
+  }
+  function initCity() {
+    buildings.length = 0;
+    for (let i = 0; i < N_BUILDINGS; i++) buildings.push(makeBuilding(Math.random() * CITY_DEPTH));
+    camZ = 0; camX = 0; camY = 215; camRoll = 0; camXPrev = 0;
   }
 
-  // --- スカイライン1層をプリレンダー ---
-  // 層ごとに必要最小限の高さだけ持つ（毎フレームの転送面積を抑える）
-  function buildLayer(spec, tw, horizon) {
-    const maxH = horizon * spec.hMul;
-    const bandH = Math.ceil(maxH) + 28;
-    const cv = makeCanvas(tw, bandH);
+  // ===== 窓テクスチャ（ビルの外壁。6種 × 色でキャッシュ） =====
+  const TEX_W = 64, TEX_H = 256;
+  const TEX_COLS = 5, TEX_ROWS = 26;   // テクスチャ内の窓の枚数
+  const facadeCache = new Map();
+  const patCache = new Map();
+  function facadeTex(variant, colorKey, accent) {
+    const key = variant + "|" + colorKey;
+    let cv = facadeCache.get(key);
+    if (cv) return cv;
+    cv = makeCanvas(TEX_W, TEX_H);
     const c = cv.getContext("2d");
-    const hazeCol = [38, 54, 80];
-    const body = mix([2, 3, 7], hazeCol, spec.haze);
-    const roof = mix(body, [70, 96, 130], 0.5);
-    const dynWins = [], beacons = [], neons = [];
-    // 壁面は上ほど暗く、地平近くほど霞む（大気遠近）
-    const bodyGrad = c.createLinearGradient(0, 0, 0, bandH);
-    bodyGrad.addColorStop(0, rgba(mix(body, [0, 0, 0], 0.4), 1));
-    bodyGrad.addColorStop(0.7, rgba(body, 1));
-    bodyGrad.addColorStop(1, rgba(mix(body, hazeCol, 0.5), 1));
+    // 壁面はほぼ黒（Rez の平均輝度 0.133 に合わせて暗く保つ）
+    c.fillStyle = "rgba(4,5,9,0.93)";
+    c.fillRect(0, 0, TEX_W, TEX_H);
 
-    // 同じ建物を右端跨ぎでも描くための小ヘルパ
-    const shapes = [];
-    let x = -30;
-    while (x < tw + 20) {
-      const bw = rand(spec.wMin, spec.wMax);
-      const bh = rand(maxH * 0.34, maxH);
-      shapes.push({ x, w: bw, h: bh });
-      x += bw + rand(2, 12);
-    }
-
-    for (const s of shapes) {
-      for (const dx of (s.x + s.w > tw ? [0, -tw] : s.x < 0 ? [0, tw] : [0])) {
-        const bx = s.x + dx, by = bandH - s.h;
-        // 本体
-        c.fillStyle = bodyGrad;
-        c.fillRect(bx, by, s.w, s.h);
-        // セットバック（段付きの頂部）
-        if (Math.random() < 0.45 && s.w > 26) {
-          const tw2 = s.w * rand(0.35, 0.68), th = s.h * rand(0.06, 0.16);
-          c.fillRect(bx + (s.w - tw2) / 2, by - th, tw2, th);
-        }
-        // 屋上のエッジ（わずかな受光）
-        c.fillStyle = rgba(roof, 0.55);
-        c.fillRect(bx, by, s.w, 1);
-        // 窓明かり（焼き込み）
-        const st = spec.step, ws = spec.win;
-        const lit = 0.27 + spec.haze * 0.12;
-        for (let wy = by + 5; wy < bandH - 3; wy += st) {
-          for (let wx = bx + 3; wx < bx + s.w - ws - 1; wx += st) {
-            if (Math.random() > lit) continue;
-            const warm = Math.random();
-            const col = warm < 0.72 ? [255, 208, 148] : warm < 0.9 ? [190, 226, 255] : [255, 240, 214];
-            c.fillStyle = rgba(col, rand(0.16, 0.62) * (1 - spec.haze * 0.45));
-            c.fillRect(wx, wy, ws, Math.max(1, ws - 1));
-          }
-        }
-        // アンテナ + 航空障害灯
-        if (s.h > maxH * 0.72 && Math.random() < 0.5) {
-          const ax = bx + s.w / 2, ah = rand(6, 22);
-          c.fillStyle = rgba(roof, 0.7);
-          c.fillRect(ax, by - ah, 1, ah);
-          beacons.push({ x: ax + 0.5, y: by - ah, ph: Math.random() * TAU });
-        }
-        // 明滅する窓（動的に上描き）
-        for (let i = 0; i < 2 && dynWins.length < spec.dyn; i++) {
-          if (s.h < 30) break;
-          const wx = bx + rand(3, s.w - 4), wy = by + rand(5, s.h - 6);
-          dynWins.push({ x: wx, y: wy, w: spec.win + 1, h: spec.win + 1, ph: Math.random() * TAU });
-        }
+    const cols = TEX_COLS, rows = TEX_ROWS;
+    const gw = TEX_W / cols, gh = TEX_H / rows;
+    // variant ごとに決まったパターンを作る（毎回同じ見た目になるよう疑似乱数）
+    let seed = variant * 7919 + 13;
+    const rnd = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    for (let r = 0; r < rows; r++) {
+      for (let cc = 0; cc < cols; cc++) {
+        const v = rnd();
+        if (v > 0.62) continue;                    // 消灯
+        const bright = v < 0.12 ? 1 : v < 0.3 ? 0.6 : 0.32;
+        const warmWin = rnd() < 0.34;
+        const col = warmWin ? [255, 214, 150] : accent;
+        c.fillStyle = rgba(col, 0.14 + bright * 0.55);
+        c.fillRect(cc * gw + gw * 0.22, r * gh + gh * 0.24, gw * 0.56, gh * 0.44);
       }
     }
+    facadeCache.set(key, cv);
+    if (facadeCache.size > 40) {                   // 色替わりで無限に増えないよう間引く
+      const first = facadeCache.keys().next().value;
+      if (first !== key) facadeCache.delete(first);
+    }
+    return cv;
+  }
 
-    // 最前列にはネオン看板（縦帯 / 横帯）
-    if (spec.haze < 0.2) {
-      const n = spec.haze < 0.1 ? 5 : 3;
-      for (let i = 0; i < n; i++) {
-        const vertical = Math.random() < 0.55;
-        neons.push({
-          x: rand(30, tw - 30),
-          y: bandH - rand(maxH * 0.08, maxH * 0.9),
-          w: vertical ? rand(3, 6) : rand(20, 54),
-          h: vertical ? rand(24, 70) : rand(4, 9),
-          ph: Math.random() * TAU,
-          sub: Math.random() < 0.4,
-        });
-      }
+  // タイリング用パターン（テクスチャと同じキーでキャッシュ）
+  function facadePattern(ctx, variant, colorKey, accent) {
+    const key = variant + "|" + colorKey;
+    let p = patCache.get(key);
+    if (!p) {
+      p = ctx.createPattern(facadeTex(variant, colorKey, accent), "repeat");
+      patCache.set(key, p);
+      if (patCache.size > 40) patCache.delete(patCache.keys().next().value);
     }
-    // 層ごとの不透明度を焼き込む（描画時の globalAlpha を避けて転送を速くする）
-    if (spec.alpha < 1) {
-      c.globalCompositeOperation = "destination-in";
-      c.fillStyle = `rgba(0,0,0,${spec.alpha})`;
-      c.fillRect(0, 0, tw, bandH);
-      c.globalCompositeOperation = "source-over";
-    }
+    return p;
+  }
 
-    // 反射用の上下反転コピー（最前列のみ）。毎フレームの scale(1,-1) を避ける
-    let flip = null;
-    if (spec.haze < 0.1) {
-      flip = makeCanvas(tw, bandH);
-      const fc = flip.getContext("2d");
-      fc.translate(0, bandH); fc.scale(1, -1);
-      fc.drawImage(cv, 0, 0);
-    }
+  // ===== 投影 =====
+  // ワールド (px:横, py:高さ, pz:奥行) → 画面。カメラのロールを適用する。
+  function proj(px, py, pz) {
+    const dz = pz - camZ;
+    if (dz < 14) return null;
+    const f = FOCAL / dz;
+    const ex = px - camX, ey = py - camY;
+    const cr = Math.cos(camRoll), sr = Math.sin(camRoll);
     return {
-      cv, flip, spec, bandH, top: Math.round(horizon - bandH),
-      dynWins, beacons, neons, off: rand(0, tw),
+      x: halfW + (ex * cr - ey * sr) * f,
+      y: halfH - (ex * sr + ey * cr) * f,
+      f, dz,
     };
   }
 
+  // 遠いほど空に溶ける。さらに近すぎる建物も溶かして「壁」になるのを防ぐ。
+  function fogOf(dz) {
+    const t = Math.min(1, Math.max(0, (dz - 300) / (FAR - 300)));
+    const far = 1 - t * t;
+    const near = Math.min(1, Math.max(0, (dz - 90) / NEAR_FADE));
+    return far * near;
+  }
+
   function initBg(w, h) {
-    if (!w || !h || w < 2 || h < 2) return;
     bgW = w; bgH = h;
-    horizonY = Math.round(h * HORIZON);
-    tileW = Math.max(w, 900);
-
-    layers.length = 0;
-    for (const spec of LAYER_SPECS) layers.push(buildLayer(spec, tileW, horizonY));
-    glowCache.clear(); bokehCache.clear();
-
-    // 星
+    halfW = w / 2; halfH = h * 0.56;   // 地平線をやや下に置いて見上げ気味に
     stars.length = 0;
-    for (let i = 0; i < 90; i++)
-      stars.push({ x: Math.random() * w, y: Math.random() * horizonY * 0.5, r: rand(0.3, 1.2), ph: Math.random() * TAU });
-
-    // ボケ粒子（遠景 / 近景）
-    bokehFar.length = 0; bokehNear.length = 0;
-    for (let i = 0; i < 26; i++)
-      bokehFar.push({ x: Math.random() * w, y: Math.random() * horizonY, r: rand(6, 20), a: rand(0.05, 0.16), vx: rand(-6, 6), vy: rand(-4, 2), ph: Math.random() * TAU, sub: Math.random() < 0.35 });
-    for (let i = 0; i < 16; i++)
-      bokehNear.push({ x: Math.random() * w, y: rand(horizonY * 0.35, h), r: rand(24, 68), a: rand(0.04, 0.11), vx: rand(-14, 14), vy: rand(-8, 4), ph: Math.random() * TAU, sub: Math.random() < 0.5 });
-
-    // 路面の光跡（車）
-    trails.length = 0;
-    for (let i = 0; i < 12; i++) {
-      const d = Math.random();
-      trails.push(resetTrail({}, w, h, d));
+    for (let i = 0; i < 140; i++) {
+      stars.push({ x: Math.random() * w, y: Math.random() * h * 0.62, r: rand(0.4, 1.5), ph: Math.random() * TAU });
     }
-
-    // 通行人
-    if (!pedSprites.length) buildPedSprites();
-    peds.length = 0;
-    for (let i = 0; i < 7; i++) {
-      const near = i < 3;
-      peds.push({
-        x: Math.random() * (w + 200) - 100,
-        scale: near ? rand(2.6, 4.4) : rand(1.2, 2.0),
-        y: near ? h + rand(2, 14) : h * rand(0.90, 0.97),
-        v: (Math.random() < 0.5 ? -1 : 1) * rand(14, 42),
-        ph: Math.random() * 6,
-        dark: near ? 1 : 0.82,
-      });
-    }
-
-    // 空と路面のベースを焼くバックドロップ（ビネットは CSS 側 .vignette が担当）
-    backdrop = makeCanvas(w, h);
-    backdropKey = "";
-
-    gridScroll = 0;
+    if (buildings.length === 0) initCity();
     bgInit = true;
   }
 
-  function resetTrail(t, w, h, d) {
-    const depth = d === undefined ? Math.random() : d; // 0=遠 1=近
-    t.depth = depth;
-    t.y = horizonY + 6 + Math.pow(depth, 1.7) * (h - horizonY - 10);
-    t.dir = Math.random() < 0.5 ? 1 : -1;
-    t.x = t.dir > 0 ? -rand(40, 400) : w + rand(40, 400);
-    t.sp = (60 + depth * 620) * t.dir;
-    t.len = 30 + depth * 190;
-    t.th = 1.4 + depth * 6;
-    t.red = t.dir < 0;                                  // 遠ざかる車=テールランプ
-    t.a = 0.16 + depth * 0.34;
-    return t;
-  }
-
-  // --- 空と路面のベース（全画面グラデ）をキャッシュ ---
-  // 毎フレーム全画面グラデを塗ると重いので、色が実質変わったときだけ焼き直す
-  function updateBackdrop(w, h) {
-    const key = `${curSky.map((v) => v / 12 | 0).join()}|${curAccent.map((v) => v / 26 | 0).join()}`;
-    if (key === backdropKey) return;
-    backdropKey = key;
-    const c = backdrop.getContext("2d");
-    const sky = c.createLinearGradient(0, 0, 0, horizonY);
-    sky.addColorStop(0, rgba(mix(curSky, [0, 0, 0], 0.45), 1));
-    sky.addColorStop(0.55, rgba(curSky, 1));
-    sky.addColorStop(1, rgba(mix(curSky, curAccent, 0.16), 1));
-    c.fillStyle = sky;
-    c.fillRect(0, 0, w, horizonY);
-    const road = c.createLinearGradient(0, horizonY, 0, h);
-    road.addColorStop(0, rgba(mix(curSky, curAccent, 0.12), 1));
-    road.addColorStop(0.35, rgba(mix(curSky, [0, 0, 0], 0.55), 1));
-    road.addColorStop(1, "rgba(0,0,0,1)");
-    c.fillStyle = road;
-    c.fillRect(0, horizonY, w, h - horizonY);
-  }
-
-  // --- Rez 的ワイヤーフレーム地平 ---
-  function drawWireGrid(ctx, w, h, pulse, dens) {
-    const vpx = w * 0.5, gh = h - horizonY;
+  // ===== 地面のワイヤーグリッド（Rez の「網の中」を担保する） =====
+  function drawGround(ctx, pulse, dens) {
+    const GZ = 220, GX = 260;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.lineWidth = 1;
 
-    // 消失点へ収束する縦線
-    const cols = 22;
-    const aV = (0.045 + pulse * 0.05) * dens;
-    ctx.strokeStyle = rgba(curAccent, aV);
-    ctx.beginPath();
-    for (let i = 0; i <= cols; i++) {
-      const t = i / cols - 0.5;
-      ctx.moveTo(vpx + t * w * 0.14, horizonY);
-      ctx.lineTo(vpx + t * w * 3.4, h);
+    // 奥行き方向の横線
+    const z0 = Math.floor(camZ / GZ) * GZ;
+    for (let i = 1; i < FAR / GZ; i++) {
+      const z = z0 + i * GZ;
+      const a = proj(-4200, 0, z), b = proj(4200, 0, z);
+      if (!a || !b) continue;
+      const fog = fogOf(z - camZ);
+      ctx.strokeStyle = rgba(curAccent, 0.055 * fog * dens * (1 + pulse * 0.7));
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
-    ctx.stroke();
-
-    // 手前へ流れる横線（透視スペーシング）
-    const rows = 16;
-    ctx.beginPath();
-    for (let i = 0; i < rows; i++) {
-      const t = ((i + gridScroll) % rows) / rows;
-      const y = horizonY + gh * Math.pow(t, 2.6);
-      ctx.moveTo(0, y); ctx.lineTo(w, y);
+    // 進行方向の縦線
+    for (let k = -14; k <= 14; k++) {
+      const x = k * GX;
+      const a = proj(x, 0, camZ + 40), b = proj(x, 0, camZ + FAR);
+      if (!a || !b) continue;
+      ctx.strokeStyle = rgba(curAccent, 0.05 * dens);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     }
-    ctx.strokeStyle = rgba(curAccent, (0.05 + pulse * 0.06) * dens);
-    ctx.stroke();
-
-    // 地平線（鋭い一本）
-    ctx.strokeStyle = rgba(mix(curAccent, [255, 255, 255], 0.5), 0.16 + pulse * 0.22);
-    ctx.beginPath(); ctx.moveTo(0, horizonY + 0.5); ctx.lineTo(w, horizonY + 0.5); ctx.stroke();
     ctx.restore();
   }
 
-  // --- スカイライン層の描画（タイル反復）---
-  // 転送先 x は必ず整数にする（小数だと再サンプリングの遅い経路に落ちて激重になる）
-  function layerOffset(L) {
-    return -Math.round((time * L.spec.speed + L.off) % tileW);
-  }
-  function drawLayerTiles(ctx, L, w, off) {
-    for (let x = off; x < w; x += tileW) ctx.drawImage(L.cv, x, L.top);
+  // ===== ビル1棟 =====
+  function drawBuilding(ctx, B, pulse, dens) {
+    const x0 = B.x - B.w * 0.5, x1 = B.x + B.w * 0.5;
+    const z0 = B.z - B.d * 0.5, z1 = B.z + B.d * 0.5;
+    const dz = z0 - camZ;
+    const fog = fogOf(dz);
+    if (fog <= 0.02) return;
+
+    // 手前面（z0 は常にカメラ側）
+    const fTL = proj(x0, B.h, z0), fTR = proj(x1, B.h, z0);
+    const fBL = proj(x0, 0, z0), fBR = proj(x1, 0, z0);
+    if (!fTL || !fTR || !fBL || !fBR) return;
+    // 画面外なら捨てる
+    const minX = Math.min(fTL.x, fBL.x), maxX = Math.max(fTR.x, fBR.x);
+    if (maxX < -80 || minX > bgW + 80) return;
+
+    // 側面（カメラのある側の面だけ描く）
+    let sTA = null, sTB = null, sBA = null, sBB = null;
+    if (camX < x0) {
+      sTA = fTL; sBA = fBL;
+      sTB = proj(x0, B.h, z1); sBB = proj(x0, 0, z1);
+    } else if (camX > x1) {
+      sTA = fTR; sBA = fBR;
+      sTB = proj(x1, B.h, z1); sBB = proj(x1, 0, z1);
+    }
+
+    ctx.save();
+
+    // --- 側面: 暗く落として立体感を出す ---
+    if (sTB && sBB) {
+      ctx.beginPath();
+      ctx.moveTo(sTA.x, sTA.y); ctx.lineTo(sTB.x, sTB.y);
+      ctx.lineTo(sBB.x, sBB.y); ctx.lineTo(sBA.x, sBA.y);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(2,3,6,${(0.86 * fog).toFixed(3)})`;
+      ctx.fill();
+      ctx.strokeStyle = rgba(curAccent, 0.10 * fog * dens);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // --- 正面: 窓テクスチャをタイリングして貼る ---
+    // 正面は z 一定なので投影は相似変換になり、テクスチャを正確に載せられる。
+    // 窓1つのワールドサイズを固定し、建物の大きさに応じて枚数を変える
+    // （引き伸ばすと窓が巨大化して「壁」に見えてしまうため）。
+    const rx = Math.max(1, Math.round(B.w / WIN_W) / TEX_COLS);
+    const ry = Math.max(1, Math.round(B.h / WIN_H) / TEX_ROWS);
+    const spanX = TEX_W * rx, spanY = TEX_H * ry;
+    const ux = (fTR.x - fTL.x) / spanX, uy = (fTR.y - fTL.y) / spanX;
+    const vx = (fBL.x - fTL.x) / spanY, vy = (fBL.y - fTL.y) / spanY;
+    ctx.save();
+    ctx.globalAlpha = fog;
+    ctx.transform(ux, uy, vx, vy, fTL.x, fTL.y);
+    ctx.fillStyle = facadePattern(ctx, B.variant, qkey(curAccent), curAccent);
+    ctx.fillRect(0, 0, spanX, spanY);
+    ctx.restore();
+
+    // --- 稜線（ネオンの縁取り。近いほど強く、拍で明滅） ---
+    const edge = 0.16 + pulse * 0.26 * dens;
+    ctx.strokeStyle = rgba(curAccent, edge * fog * B.lit);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(fBL.x, fBL.y); ctx.lineTo(fTL.x, fTL.y);
+    ctx.lineTo(fTR.x, fTR.y); ctx.lineTo(fBR.x, fBR.y);
+    ctx.stroke();
+    // 屋上のライン
+    ctx.strokeStyle = rgba(curSub, (edge * 1.3) * fog * B.lit);
+    ctx.beginPath();
+    ctx.moveTo(fTL.x, fTL.y); ctx.lineTo(fTR.x, fTR.y);
+    ctx.stroke();
+
+    // --- 屋上の航空障害灯（拍で点滅） ---
+    if (B.spire && fog > 0.25) {
+      const tip = proj(B.x, B.h + 60, z0);
+      if (tip) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        const blink = 0.35 + 0.65 * pulse;
+        const r = Math.max(2, 7 * tip.f * 40);
+        ctx.globalAlpha = fog * blink;
+        ctx.drawImage(glowSprite("rgba(255,70,60,1)"), tip.x - r, tip.y - r, r * 2, r * 2);
+        ctx.restore();
+        ctx.strokeStyle = rgba(curSub, 0.2 * fog);
+        ctx.beginPath();
+        ctx.moveTo((fTL.x + fTR.x) / 2, (fTL.y + fTR.y) / 2);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
   }
 
+  // ===== 背景本体 =====
   function drawBackground(ctx, w, h, dt, beat, intensity = 1) {
     if (!bgInit || w !== bgW || h !== bgH) { initBg(w, h); if (!bgInit) return; }
     time += dt;
-    gridScroll = (gridScroll + dt * 1.4 * curGrid) % 16;
 
-    // 拍の検出
     const pulse = Math.pow(1 - beat, 3);
     if (beat < prevBeat) { beatCount++; if (beatCount % 4 === 0) barPulse = 1; }
     prevBeat = beat;
     barPulse = Math.max(0, barPulse - dt * 1.6);
 
-    // セクションでトーンを段階変化
+    // --- セクションの色とドローンの機動を補間 ---
     const secId = (typeof GameAudio !== "undefined" && GameAudio.section
       ? GameAudio.section() : 0) % SECTIONS.length;
     const sec = SECTIONS[secId];
-
-    // セクションが切り替わった瞬間 = 曲の展開点。閃光で「場面転換」を叩きつける
     if (secId !== prevSecId) {
       if (prevSecId >= 0) secFlash = (secId === 2 || secId === 4) ? 1 : 0.45;
       prevSecId = secId;
@@ -730,229 +695,82 @@ const Effects = (() => {
     curGrid = lerp(curGrid, sec.grid, k);
     const dens = curDens * (1 + secFlash * 0.5);
 
-    // ---- カメラ: ゆっくりしたパン / ドリー / ロール ----
-    // セクションが上がるほど振れ幅が増え、転換時にドンと寄る。
-    // 1.05 倍のオーバースキャンで縁が欠けないようにする。
-    const cx0 = w / 2, cy0 = h / 2;
-    const panX = Math.sin(time * 0.13) * 16 * curCam;
-    const panY = Math.cos(time * 0.09) * 9 * curCam;
-    const roll = Math.sin(time * 0.047) * 0.007 * curCam;
-    const zoom = 1.05 + Math.sin(time * 0.11) * 0.022 * curCam
-               + pulse * 0.008 * curCam + secFlash * 0.035;
-    ctx.save();
-    ctx.translate(cx0 + panX, cy0 + panY);
-    ctx.rotate(roll);
-    ctx.scale(zoom, zoom);
-    ctx.translate(-cx0, -cy0);
+    // --- ドローンの機動 ---
+    // 前進しながら、周期の異なる正弦を重ねて「手飛ばし」らしい不規則な蛇行にする。
+    camZ += BASE_SPEED * curGrid * (1 + pulse * 0.12) * dt;
+    camXPrev = camX;
+    camX = (Math.sin(time * 0.23) * 150 + Math.sin(time * 0.081) * 210) * curCam;
+    camY = 215 + Math.sin(time * 0.17) * 70 * curCam + Math.sin(time * 0.41) * 14 * curCam;
+    // 旋回方向へバンク（横速度に比例）。ドローンらしさの肝。
+    const vx = dt > 0 ? (camX - camXPrev) / dt : 0;
+    camRoll = lerp(camRoll, Math.max(-0.34, Math.min(0.34, -vx * 0.0016)), Math.min(1, dt * 3));
 
-    // ---- 1. 空 + 路面のベース（キャッシュ済みバックドロップを 1:1 転送）----
-    updateBackdrop(w, h);
-    ctx.drawImage(backdrop, 0, 0);
+    // --- 空 ---
+    const skyG = ctx.createLinearGradient(0, 0, 0, h);
+    skyG.addColorStop(0, rgba(mix(curSky, [0, 0, 0], 0.45), 1));
+    skyG.addColorStop(0.55, rgba(curSky, 1));
+    skyG.addColorStop(1, rgba(mix(curSky, curAccent, 0.10), 1));
+    ctx.fillStyle = skyG;
+    ctx.fillRect(0, 0, w, h);
 
-    // 星
+    // --- 星（ロールに合わせてわずかに回す） ---
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
+    ctx.translate(halfW, halfH);
+    ctx.rotate(camRoll * 0.5);
+    ctx.translate(-halfW, -halfH);
     for (const s of stars) {
-      const tw2 = 0.4 + 0.6 * Math.sin(time * 1.7 + s.ph);
-      ctx.fillStyle = `rgba(200,220,255,${(0.10 + 0.22 * tw2).toFixed(3)})`;
+      const tw = 0.4 + 0.6 * Math.sin(time * 1.7 + s.ph);
+      ctx.fillStyle = `rgba(200,220,255,${(0.08 + 0.2 * tw).toFixed(3)})`;
       ctx.fillRect(s.x, s.y, s.r, s.r);
     }
-    // 遠景ボケ
-    for (const b of bokehFar) {
-      b.x += b.vx * dt; b.y += b.vy * dt;
-      if (b.x < -80) b.x = w + 60; else if (b.x > w + 80) b.x = -60;
-      if (b.y < -40) b.y = horizonY;
-      const r = b.r * (1 + pulse * 0.06);
-      ctx.globalAlpha = b.a * (0.7 + 0.3 * Math.sin(time + b.ph)) * dens;
-      const sp = bokehSprite(qkey(b.sub ? curSub : curAccent));
-      ctx.drawImage(sp, b.x - r, b.y - r, r * 2, r * 2);
-    }
-    ctx.globalAlpha = 1;
     ctx.restore();
 
-    // ---- 2. スカイライン（奥→手前 / 視差）----
-    const layerOffs = [];
-    for (const L of layers) {
-      const off = layerOffset(L);
-      layerOffs.push(off);
-      drawLayerTiles(ctx, L, w, off);
-    }
+    // --- 地面グリッド ---
+    drawGround(ctx, pulse, dens);
 
-    // 明滅する窓・航空障害灯・ネオン（加算）
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < layers.length; i++) {
-      const L = layers[i], off = layerOffs[i];
-      for (let x = off; x < w; x += tileW) {
-        for (const dw of L.dynWins) {
-          const f = 0.5 + 0.5 * Math.sin(time * 2.4 + dw.ph);
-          const a = (0.18 + pulse * 0.55 * f) * dens * L.spec.alpha;
-          ctx.fillStyle = rgba(sec.warm, a);
-          ctx.fillRect(x + dw.x, L.top + dw.y, dw.w, dw.h);
-        }
-        for (const bc of L.beacons) {
-          const bl = Math.sin(time * 2.2 + bc.ph);
-          if (bl > 0.7) {
-            ctx.fillStyle = `rgba(255,80,60,${(0.5 * (bl - 0.7) / 0.3).toFixed(3)})`;
-            ctx.fillRect(x + bc.x - 1, L.top + bc.y - 1, 2, 2);
-          }
-        }
-        for (const nn of L.neons) {
-          const f = 0.62 + 0.38 * Math.sin(time * 3 + nn.ph);
-          const col = qkey(nn.sub ? curSub : curAccent);
-          const gr = Math.max(nn.w, nn.h) * (1.9 + pulse * 0.5);
-          ctx.globalAlpha = (0.30 + pulse * 0.32) * f * dens;
-          ctx.drawImage(glowSprite(col), x + nn.x + nn.w / 2 - gr, L.top + nn.y + nn.h / 2 - gr, gr * 2, gr * 2);
-          ctx.globalAlpha = (0.55 + pulse * 0.35) * f;
-          ctx.fillStyle = "rgba(255,255,255,0.9)";
-          ctx.fillRect(x + nn.x, L.top + nn.y, nn.w, nn.h);
-          ctx.globalAlpha = 1;
-        }
+    // --- ビル群（奥→手前のペインターズ・アルゴリズム） ---
+    for (const B of buildings) {
+      // 通り過ぎたら前方へ回して無限に続く街にする
+      if (B.z - camZ < -260) {
+        const nb = makeBuilding(B.z + CITY_DEPTH);
+        B.x = nb.x; B.z = nb.z; B.w = nb.w; B.d = nb.d;
+        B.h = nb.h; B.variant = nb.variant; B.lit = nb.lit; B.spire = nb.spire;
       }
     }
-    ctx.restore();
+    const vis = buildings
+      .filter((B) => B.z - camZ > 14 && B.z - camZ < FAR)
+      .sort((a, b) => (b.z - a.z));
+    for (const B of vis) drawBuilding(ctx, B, pulse, dens);
 
-    // ---- 3. 大気遠近のヘイズ帯（地平にたまるスモッグ）----
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const hz = ctx.createLinearGradient(0, horizonY - h * 0.22, 0, horizonY + 2);
-    hz.addColorStop(0, rgba(curAccent, 0));
-    hz.addColorStop(0.72, rgba(curAccent, 0.05 * dens));
-    hz.addColorStop(1, rgba(mix(curAccent, sec.warm, 0.4), (0.13 + pulse * 0.07) * dens));
-    ctx.fillStyle = hz;
-    ctx.fillRect(0, horizonY - h * 0.22, w, h * 0.22 + 2);
-    ctx.restore();
-
-    // ---- 4. 濡れた路面（ベースはバックドロップ済み。ここから映り込みを重ねる）----
-    // 反射（プリレンダー済みの反転コピーを地平の下へ 1:1 転送）
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, horizonY, w, h - horizonY); ctx.clip();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.globalAlpha = 0.32 * dens;
-    for (let i = 0; i < layers.length; i++) {
-      const L = layers[i];
-      if (!L.flip) continue;
-      const off = layerOffs[i];
-      for (let x = off; x < w; x += tileW) ctx.drawImage(L.flip, x, horizonY);
-    }
-    ctx.restore();
-
-    // 反射のにじみを縦に引き伸ばす（ネオンの映り込み）
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < layers.length; i++) {
-      const L = layers[i], off = layerOffs[i];
-      if (!L.neons.length) continue;
-      for (let x = off; x < w; x += tileW) {
-        for (const nn of L.neons) {
-          const f = 0.6 + 0.4 * Math.sin(time * 3 + nn.ph);
-          const col = qkey(nn.sub ? curSub : curAccent);
-          // 縦に引き伸ばした滲み（時間で緩くゆらぐ = 水面の揺れ）
-          const rw = Math.max(6, nn.w * 2.2);
-          const rh = (h - horizonY) * (0.44 + 0.06 * Math.sin(time * 1.6 + nn.ph));
-          ctx.globalAlpha = (0.14 + pulse * 0.12) * f * dens;
-          ctx.drawImage(glowSprite(col), x + nn.x + nn.w / 2 - rw, horizonY, rw * 2, rh);
-        }
-      }
-    }
-    ctx.globalAlpha = 1;
-    // 水面の波紋バンド（横方向の暗線でアスファルトの起伏）
-    ctx.globalCompositeOperation = "source-over";
-    for (let i = 0; i < 14; i++) {
-      const t = i / 14;
-      const y = horizonY + Math.pow(t, 2.1) * (h - horizonY);
-      const a = 0.05 + 0.05 * Math.sin(time * 1.1 + i * 1.7);
-      ctx.fillStyle = `rgba(0,0,0,${a.toFixed(3)})`;
-      ctx.fillRect(0, y, w, 1 + t * 4);
-    }
-    ctx.restore();
-
-    // ---- 5. ワイヤーフレーム地平 ----
-    drawWireGrid(ctx, w, h, pulse + barPulse * 0.4, dens);
-
-    // ---- 6. 車の光跡 ----
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (const t of trails) {
-      t.x += t.sp * dt;
-      if (t.x < -t.len - 420 || t.x > w + t.len + 420) { resetTrail(t, w, h); continue; }
-      const col = t.red ? "rgba(255,60,50,1)" : "rgba(255,238,200,1)";
-      ctx.globalAlpha = t.a * (0.75 + pulse * 0.25);
-      ctx.drawImage(glowSprite(col), t.x - t.len, t.y - t.th * 2.2, t.len * 2, t.th * 4.4);
-      ctx.globalAlpha = t.a;
-      ctx.fillStyle = t.red ? "rgba(255,120,110,0.8)" : "rgba(255,252,240,0.9)";
-      ctx.fillRect(t.x - t.len * 0.2, t.y - t.th * 0.25, t.len * 0.4, Math.max(1, t.th * 0.5));
-    }
-    ctx.globalAlpha = 1;
-    ctx.restore();
-
-    // ---- 7. 手前のボケ粒子（被写界深度）----
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (const b of bokehNear) {
-      b.x += b.vx * dt; b.y += b.vy * dt;
-      if (b.x < -140) b.x = w + 120; else if (b.x > w + 140) b.x = -120;
-      if (b.y < horizonY * 0.3) b.y = h + 40; else if (b.y > h + 60) b.y = horizonY * 0.4;
-      const r = b.r * (1 + pulse * 0.08 + barPulse * 0.05);
-      ctx.globalAlpha = b.a * (0.65 + 0.35 * Math.sin(time * 0.8 + b.ph)) * dens;
-      ctx.drawImage(bokehSprite(qkey(b.sub ? curSub : curAccent)), b.x - r, b.y - r, r * 2, r * 2);
-    }
-    ctx.globalAlpha = 1;
-    ctx.restore();
-
-    // ---- 8. 通行人シルエット（手前を横切る）----
-    for (const p of peds) {
-      p.x += p.v * dt;
-      p.ph += Math.abs(p.v) * dt * 0.14;
-      if (p.x < -140) p.x = w + 110; else if (p.x > w + 140) p.x = -110;
-      const sp = pedSprites[(p.ph | 0) % pedSprites.length];
-      const dw = sp.width * p.scale, dh = sp.height * p.scale;
-      const bob = Math.sin(p.ph * Math.PI) * p.scale * 0.6;
-      const ty = p.y - dh + bob;
-      ctx.save();
-      ctx.translate(p.x - dw / 2, 0);
-      if (p.v < 0) { ctx.translate(dw, 0); ctx.scale(-1, 1); } // 進行方向へ反転
-      // 背後のネオンによる逆光ハロー（先に置く → 本体は黒く抜ける）
-      ctx.globalCompositeOperation = "lighter";
-      ctx.globalAlpha = (0.07 + pulse * 0.05) * p.dark;
-      ctx.drawImage(glowSprite(qkey(curAccent)), -dw * 0.4, ty - dh * 0.05, dw * 1.8, dh * 0.95);
-      // シルエット本体（ほぼ黒）
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = p.dark;
-      ctx.drawImage(sp, 0, ty, dw, dh);
-      ctx.restore();
-    }
-
-    // ---- 8.5 放射状のスピードライン（Rez の「網の中を突き進む」感） ----
-    // 中心から外へ伸びる細い光条。拍で伸び、セクションが上がるほど密度が増す。
+    // --- 放射状のスピードライン（前進感を強調） ---
     {
-      const n = Math.round(26 + dens * 26);
+      const n = Math.round(22 + dens * 26);
       const reach = Math.max(w, h) * 0.62;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.lineCap = "round";
       for (let i = 0; i < n; i++) {
-        // 疑似乱数を i から作り、フレーム間で位置を固定する
         const seed = Math.sin(i * 12.9898) * 43758.5453;
-        const rnd = seed - Math.floor(seed);
-        const ang = (i / n) * Math.PI * 2 + rnd * 0.7 + time * 0.06;
-        const ph = (time * (0.22 + rnd * 0.5) + rnd) % 1;   // 0→1 で外へ抜ける
-        const r0 = reach * (0.10 + ph * 0.92);
-        const len = reach * (0.05 + ph * 0.20) * (0.6 + pulse * 0.9);
+        const rnd2 = seed - Math.floor(seed);
+        const ang = (i / n) * TAU + rnd2 * 0.7 + camRoll;
+        const ph = (time * (0.3 + rnd2 * 0.7) * curGrid + rnd2) % 1;
+        const r0 = reach * (0.08 + ph * 0.95);
+        const len = reach * (0.05 + ph * 0.22) * (0.6 + pulse * 0.9);
         const ca = Math.cos(ang), sa = Math.sin(ang);
-        const a = (1 - ph) * ph * 4 * (0.16 + pulse * 0.26) * dens;
+        const a = (1 - ph) * ph * 4 * (0.14 + pulse * 0.24) * dens;
         if (a <= 0.004) continue;
-        ctx.strokeStyle = rgba(rnd > 0.82 ? curSub : curAccent, Math.min(0.5, a));
-        ctx.lineWidth = 0.6 + rnd * 1.5;
+        ctx.strokeStyle = rgba(rnd2 > 0.82 ? curSub : curAccent, Math.min(0.5, a));
+        ctx.lineWidth = 0.6 + rnd2 * 1.5;
         ctx.beginPath();
-        ctx.moveTo(cx0 + ca * r0, cy0 + sa * r0 * 0.78);
-        ctx.lineTo(cx0 + ca * (r0 + len), cy0 + sa * (r0 + len) * 0.78);
+        ctx.moveTo(halfW + ca * r0, halfH + sa * r0);
+        ctx.lineTo(halfW + ca * (r0 + len), halfH + sa * (r0 + len));
         ctx.stroke();
       }
       ctx.restore();
     }
 
-    // ---- 9. 走査ライン（ビネットは CSS 側）----
+    // --- 走査ライン ---
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = rgba(curAccent, 0.012 + pulse * 0.014);
@@ -961,56 +779,52 @@ const Effects = (() => {
     ctx.fillRect(0, (scanY + h * 0.5) % h, w, 1);
     ctx.restore();
 
-    ctx.restore();  // カメラ変換を解除（以降は画面座標）
-
-    // ---- 9.5 カラーグレード ----
-    // Rez は明色の 63.6% が赤系で、平均輝度 0.133。背景の建物や空だけでは
-    // 画面全体の色が動かないので、セクションの色で環境光を足して画面ごと染める。
+    // --- カラーグレード + 前方の霞（同じ中心の加算なので1パスに統合） ---
     {
-      const amb = 0.055 + curDens * 0.055 + pulse * 0.022;
-      const gg = ctx.createRadialGradient(cx0, cy0 * 1.06, 0, cx0, cy0, Math.max(w, h) * 0.74);
-      gg.addColorStop(0.0, rgba(curAccent, amb * 1.45));
-      gg.addColorStop(0.55, rgba(curAccent, amb * 0.72));
+      const amb = 0.05 + curDens * 0.05 + pulse * 0.02;
+      const gg = ctx.createRadialGradient(halfW, halfH * 1.06, 0, halfW, halfH, Math.max(w, h) * 0.74);
+      // 中心寄りを厚くして「前方の霞」も兼ねる
+      gg.addColorStop(0.0, rgba(curAccent, amb * 1.35 + 0.10 + pulse * 0.05));
+      gg.addColorStop(0.30, rgba(curAccent, amb * 0.95 + 0.035));
+      gg.addColorStop(0.55, rgba(curAccent, amb * 0.68));
       gg.addColorStop(1.0, rgba(curAccent, amb * 0.18));
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = gg;
       ctx.fillRect(0, 0, w, h);
-      // 補色側をごく薄く入れて単調さを避ける（Rez も赤の中に青緑が差す）
       const sg = ctx.createLinearGradient(0, 0, w, h);
-      sg.addColorStop(0, rgba(curSub, amb * 0.20));
+      sg.addColorStop(0, rgba(curSub, amb * 0.18));
       sg.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = sg;
       ctx.fillRect(0, 0, w, h);
       ctx.restore();
     }
 
-    // ---- 10. セクション転換の閃光 + 収束リング ----
+    // --- セクション転換の閃光 ---
     if (secFlash > 0) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = rgba(curAccent, secFlash * 0.20);
       ctx.fillRect(0, 0, w, h);
-      // 外から中心へ収束する衝撃波
       const rr = (1 - secFlash) * Math.max(w, h) * 0.75;
       ctx.strokeStyle = rgba(curAccent, secFlash * 0.5);
       ctx.lineWidth = 2 + secFlash * 6;
       ctx.beginPath();
-      ctx.arc(cx0, cy0, Math.max(1, Math.max(w, h) * 0.75 - rr), 0, Math.PI * 2);
+      ctx.arc(halfW, halfH, Math.max(1, Math.max(w, h) * 0.75 - rr), 0, TAU);
       ctx.stroke();
       ctx.restore();
     }
 
-    // ---- 11. BURST 準備完了: 画面周縁の脈動オーラ ----
+    // --- BURST 準備完了: 画面周縁の脈動オーラ ---
     if (burstReadyOn || burstReadyT > 0) {
       burstReadyT = burstReadyOn
         ? Math.min(1, burstReadyT + dt * 2.2)
         : Math.max(0, burstReadyT - dt * 2.2);
       const throb = 0.55 + 0.45 * Math.sin(time * 5.4);
       const a = burstReadyT * (0.48 + throb * 0.46);
+      const cx0 = w / 2, cy0 = h / 2;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      // 周縁のリム（中心は完全に透明 → プレイの邪魔をしない）
       const rim = ctx.createRadialGradient(cx0, cy0, Math.min(w, h) * 0.27,
                                            cx0, cy0, Math.max(w, h) * 0.60);
       rim.addColorStop(0, "rgba(255,92,240,0)");
@@ -1019,7 +833,6 @@ const Effects = (() => {
       rim.addColorStop(1, `rgba(255,150,250,${a.toFixed(3)})`);
       ctx.fillStyle = rim;
       ctx.fillRect(0, 0, w, h);
-      // 画面四辺の帯（周辺視野で必ず捉えられる）
       const bw = Math.min(w, h) * 0.09;
       const edge = burstReadyT * (0.30 + throb * 0.45);
       const bands = [
@@ -1033,26 +846,85 @@ const Effects = (() => {
         ctx.fillStyle = gr;
         ctx.fillRect(x, y, bwd, bht);
       }
-      // 内向きに吸い寄せられるエネルギー粒
       const n = 26;
       for (let i = 0; i < n; i++) {
-        const ang = (i / n) * Math.PI * 2 + time * 0.5;
-        const ph = (time * 0.85 + i / n) % 1;          // 1→0 で中心へ
+        const ang = (i / n) * TAU + time * 0.5;
+        const ph = (time * 0.85 + i / n) % 1;
         const rad = Math.max(w, h) * (0.60 - ph * 0.34);
-        const px = cx0 + Math.cos(ang) * rad;
-        const py = cy0 + Math.sin(ang) * rad * 0.72;
         ctx.globalAlpha = burstReadyT * (1 - ph) * 0.85;
         ctx.fillStyle = "#ffa8f7";
         ctx.beginPath();
-        ctx.arc(px, py, 1.6 + (1 - ph) * 2.6, 0, Math.PI * 2);
+        ctx.arc(cx0 + Math.cos(ang) * rad, cy0 + Math.sin(ang) * rad * 0.72,
+                1.6 + (1 - ph) * 2.6, 0, TAU);
         ctx.fill();
       }
       ctx.restore();
     }
   }
 
-  // BURST ゲージ満タンの常時演出 ON/OFF
   function setBurstReady(on) { burstReadyOn = !!on; }
+
+  // =========================================================================
+  //  バナー（COMBO / BONUS / LEVEL / BURST などの大きな文字）
+  //  盤面の上に重ねるとコマが見えなくなるので、盤面の「外側」に描く。
+  // =========================================================================
+  const banners = [];
+  function banner(text, color, sub) {
+    // 同じ文字が連続したら差し替えて積み上がりを防ぐ
+    const same = banners.find((b) => b.text === text);
+    if (same) { same.age = 0; same.sub = sub || null; return; }
+    banners.push({ text, color, sub: sub || null, life: 1.5, age: 0 });
+    if (banners.length > 3) banners.shift();
+  }
+
+  function updateBanners(dt) {
+    for (let i = banners.length - 1; i >= 0; i--) {
+      banners[i].age += dt;
+      if (banners[i].age >= banners[i].life) banners.splice(i, 1);
+    }
+  }
+
+  // rect: 盤面の画面上の矩形 {x, y, w, h}
+  function drawBanners(ctx, rect) {
+    if (!banners.length || !rect) return;
+    const ls = "letterSpacing" in ctx;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const cx = rect.x + rect.w / 2;
+    banners.forEach((b, i) => {
+      const t = 1 - b.age / b.life;
+      const pop = 1 - Math.pow(1 - Math.min(1, b.age * 7), 2);
+      // 盤面の上端より上に積む（1段目が一番下）
+      const y = rect.y - 30 - i * 46;
+      ctx.save();
+      ctx.translate(cx, y);
+      ctx.scale(lerp(1.3, 1, pop), lerp(1.3, 1, pop));
+      ctx.globalAlpha = Math.min(1, t * 2.4);
+      if (ls) ctx.letterSpacing = "10px";
+      ctx.font = '200 44px "Helvetica Neue", "Arial Narrow", Arial, system-ui, sans-serif';
+      // ズレて重なる残像（本家のオーバーレイ表現）
+      ctx.globalAlpha = Math.min(1, t * 2.4) * 0.18;
+      ctx.fillStyle = b.color;
+      ctx.fillText(b.text, -12 * (1 - pop) - 7, -3);
+      ctx.fillText(b.text, 12 * (1 - pop) + 7, 3);
+      ctx.globalAlpha = Math.min(1, t * 2.4);
+      ctx.shadowColor = b.color;
+      ctx.shadowBlur = 26;
+      ctx.fillStyle = "rgba(255,255,255,0.96)";
+      ctx.fillText(b.text, 0, 0);
+      ctx.shadowBlur = 0;
+      if (b.sub) {
+        if (ls) ctx.letterSpacing = "4px";
+        ctx.font = '600 14px "Helvetica Neue", Arial, system-ui, sans-serif';
+        ctx.fillStyle = b.color;
+        ctx.fillText(b.sub, 0, 30);
+      }
+      if (ls) ctx.letterSpacing = "0px";
+      ctx.restore();
+    });
+    ctx.restore();
+  }
 
   function reset() {
     particles.length = 0;
@@ -1062,6 +934,7 @@ const Effects = (() => {
     columns.length = 0;
     floats.length = 0;
     zones.length = 0;
+    banners.length = 0;
     flash = 0; shake = 0;
     burstReadyOn = false; burstReadyT = 0;
   }
@@ -1069,6 +942,6 @@ const Effects = (() => {
   return {
     burst, shatter, ring, column, popup, scorePop, zone, screenFlash, screenShake,
     update, drawForeground, drawBackground, getShake, reset, initBg,
-    setBurstReady,
+    setBurstReady, banner, drawBanners,
   };
 })();
