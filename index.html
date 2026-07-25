@@ -8,91 +8,101 @@
 </head>
 <body>
   <div class="stage">
-    <!-- 背景（ビート連動エフェクト） -->
+    <!-- 背景（ビート連動 / 夜のメトロポリス × ワイヤーフレーム） -->
     <canvas id="bg" class="bg-canvas"></canvas>
+    <div class="vignette" aria-hidden="true"></div>
 
     <div class="game-area">
-      <header class="topbar">
-        <h1 class="logo">LUMINA<span>ARISE</span></h1>
-      </header>
-
       <div class="layout">
-        <!-- 左：ステータス -->
-        <aside class="hud hud-left">
-          <div class="stat big">
+        <!-- 中央：盤面 -->
+        <main class="main">
+          <header class="topbar">
+            <h1 class="logo"><span class="logo-a">LUMINA</span><span class="logo-b">ARISE</span></h1>
+            <p class="tagline">SYNAESTHETIC BLOCK SEQUENCER</p>
+          </header>
+
+          <div class="board-wrap">
+            <div class="frame-tick frame-tick-t" aria-hidden="true"></div>
+            <canvas id="board" width="640" height="400"></canvas>
+            <div class="frame-tick frame-tick-b" aria-hidden="true"></div>
+
+            <!-- スタート画面 -->
+            <div id="start" class="overlay">
+              <div class="overlay-inner">
+                <p class="overlay-kicker">READY</p>
+                <p class="overlay-title">LUMINA ARISE</p>
+                <p class="overlay-sub">音と光のブロックシーケンサー</p>
+                <button id="start-btn" class="start-btn">START</button>
+                <p class="overlay-hint">クリック または SPACE で開始（音が鳴ります）</p>
+              </div>
+            </div>
+
+            <!-- ゲームオーバー -->
+            <div id="over" class="overlay hidden">
+              <div class="overlay-inner">
+                <p class="overlay-kicker">SESSION END</p>
+                <p class="overlay-title over">GAME OVER</p>
+                <p id="over-score" class="overlay-sub">SCORE: 0</p>
+                <button id="retry-btn" class="start-btn">RETRY</button>
+                <p class="overlay-hint">R キーでも再挑戦</p>
+              </div>
+            </div>
+          </div>
+
+          <footer class="foot">
+            同色を <strong>2×2</strong> にそろえ、流れる <strong>タイムライン</strong> で消去。
+            連続で <strong>COMBO</strong>、ゲージ満タンで <strong>BURST</strong>。
+          </footer>
+        </main>
+
+        <!-- 右：HUD -->
+        <aside class="hud">
+          <div class="stat stat-hero">
             <span class="stat-label">SCORE</span>
             <span id="score" class="stat-value">0</span>
           </div>
-          <div class="stat">
-            <span class="stat-label">2×2 SQUARES</span>
-            <span id="squares" class="stat-value">0</span>
-          </div>
-          <div class="stat">
-            <span class="stat-label">TIME</span>
-            <span id="time" class="stat-value">0:00</span>
-          </div>
-          <div class="stat">
-            <span class="stat-label">COMBO</span>
-            <span id="combo" class="stat-value">0</span>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <span class="stat-label">SQUARES</span>
+              <span id="squares" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">TIME</span>
+              <span id="time" class="stat-value">0:00</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">COMBO</span>
+              <span id="combo" class="stat-value">0</span>
+            </div>
           </div>
 
           <div class="burst-wrap">
             <span class="stat-label">BURST</span>
             <div class="burst-bar"><div id="burst-fill" class="burst-fill"></div></div>
-            <span id="burst-ready" class="burst-ready hidden">READY! [Enter]</span>
-          </div>
-        </aside>
-
-        <!-- 中央：盤面 -->
-        <div class="board-wrap">
-          <canvas id="board" width="640" height="400"></canvas>
-
-          <!-- スタート画面 -->
-          <div id="start" class="overlay">
-            <div class="overlay-inner">
-              <p class="overlay-title">LUMINA ARISE</p>
-              <p class="overlay-sub">ルミナス風・音と光のパズル</p>
-              <button id="start-btn" class="start-btn">▶ START</button>
-              <p class="overlay-hint">クリック / Space で開始（音が鳴ります）</p>
-            </div>
+            <span id="burst-ready" class="burst-ready hidden">READY — ENTER</span>
           </div>
 
-          <!-- ゲームオーバー -->
-          <div id="over" class="overlay hidden">
-            <div class="overlay-inner">
-              <p class="overlay-title over">GAME OVER</p>
-              <p id="over-score" class="overlay-sub">SCORE: 0</p>
-              <button id="retry-btn" class="start-btn">▶ RETRY</button>
-              <p class="overlay-hint">R キーでも再挑戦</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- 右：NEXT と操作 -->
-        <aside class="hud hud-right">
-          <div class="stat">
+          <div class="stat next-wrap">
             <span class="stat-label">NEXT</span>
             <canvas id="next" width="96" height="96"></canvas>
           </div>
+
           <div class="controls">
-            <h2>操作</h2>
+            <span class="stat-label">CONTROLS</span>
             <ul>
-              <li><kbd>←</kbd><kbd>→</kbd> 移動</li>
-              <li><kbd>↑</kbd> 回転</li>
-              <li><kbd>↓</kbd> 落下</li>
-              <li><kbd>Space</kbd> 一気に落下</li>
-              <li><kbd>Enter</kbd> BURST</li>
-              <li><kbd>P</kbd> 一時停止</li>
-              <li><kbd>R</kbd> リスタート</li>
-              <li><kbd>M</kbd> ミュート</li>
+              <li><span class="keys"><kbd>←</kbd><kbd>→</kbd></span><span class="act">移動</span></li>
+              <li><span class="keys"><kbd>Space</kbd></span><span class="act">回転</span></li>
+              <li><span class="keys"><kbd>↑</kbd></span><span class="act">即落下（ハードドロップ）</span></li>
+              <li><span class="keys"><kbd>↓</kbd></span><span class="act">ソフトドロップ</span></li>
+              <li><span class="keys"><kbd>Enter</kbd></span><span class="act">BURST</span></li>
+              <li><span class="keys"><kbd>P</kbd></span><span class="act">一時停止</span></li>
+              <li><span class="keys"><kbd>R</kbd></span><span class="act">リスタート</span></li>
+              <li><span class="keys"><kbd>M</kbd></span><span class="act">ミュート</span></li>
             </ul>
           </div>
         </aside>
       </div>
-
-      <footer class="foot">
-        同色を <strong>2×2</strong> にそろえ、流れる<strong>タイムライン</strong>で消去。連続で <strong>COMBO</strong>、ゲージ満タンで <strong>BURST</strong> 大量消去！
-      </footer>
     </div>
   </div>
 
