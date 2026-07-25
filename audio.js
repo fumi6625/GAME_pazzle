@@ -2,7 +2,7 @@
  * GameAudio v4 — Web Audio API のみで合成する「ダーク・メトロポリス・テクノ」
  *
  *  設計方針（Rez Infinite / LUMINES 系のクールなトランス・テクノを参照）:
- *   - BPM 130 / 64小節 ≒ 118秒 でシームレスにループ
+ *   - BPM 140 / 64小節 ≒ 110秒 でシームレスにループ（Rez Area 1 実測 141.5BPM に準拠）
  *   - 極端に低域優勢のミックス: 太いキック + 深いサブベース(36-55Hz)が主役、上物は暗く控えめ
  *   - 構成: イントロ → ビルド → ドロップ → ブレイク → ビルド2 → ドロップ2 → (先頭へ)
  *   - 音色: サブベース / アシッド(レゾナンス)ベース / 金属質パーカッション /
@@ -21,13 +21,13 @@ const GameAudio = (() => {
   "use strict";
 
   // ===== テンポ / 尺 =====
-  const BPM = 130;
-  const spb = 60 / BPM;            // 1拍 = 0.4615s
-  const STEP = spb / 4;            // 16分 = 0.1154s
-  const BAR = spb * 4;             // 1小節 = 1.846s
+  const BPM = 140;
+  const spb = 60 / BPM;            // 1拍 = 0.4286s
+  const STEP = spb / 4;            // 16分 = 0.1071s
+  const BAR = spb * 4;             // 1小節 = 1.714s
   const BARS = 64;
   const TOTAL_STEPS = BARS * 16;   // 1024ステップ
-  const LOOP_SEC = TOTAL_STEPS * STEP; // ≒118.15秒
+  const LOOP_SEC = TOTAL_STEPS * STEP; // ≒109.7秒
 
   // ===== 状態 =====
   let ctx = null;

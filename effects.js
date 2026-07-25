@@ -308,12 +308,21 @@ const Effects = (() => {
   // シーンが「別物」に見えるレベルで配色・密度・カメラを振り分ける。
   //   0=イントロ(静寂の青) 1=ビルド(マゼンタに紅潮) 2=ドロップ(ネオン爆発)
   //   3=ブレイク(深い霧の藍) 4=ラストドロップ(白熱の金)
+  // Rez Infinite Area 1 の実測に準拠:
+  //   明色の色相は 赤(0-30°) 63.6% / 桃 8.3% / シアン・青 19%、平均輝度 0.133 と極端に暗い。
+  //   色相の推移は シアン(205°) → 赤(10-18°)が本編の大半 → 緑(136°) → 桃(346°) → 青(245°)。
+  //   これを 0..4 のセクションにそのまま割り当て、錆びた赤を主役に据える。
   const SECTIONS = [
-    { accent: [80, 225, 255], sub: [255, 90, 200], warm: [255, 206, 148], sky: [5, 9, 18],  dens: 0.78, cam: 0.35, grid: 0.55 },
-    { accent: [255, 86, 208], sub: [110, 220, 255], warm: [255, 190, 160], sky: [12, 6, 24], dens: 1.20, cam: 0.75, grid: 1.00 },
-    { accent: [120, 255, 236], sub: [255, 70, 190], warm: [200, 240, 255], sky: [4, 14, 22], dens: 1.75, cam: 1.35, grid: 1.85 },
-    { accent: [70, 130, 255], sub: [130, 180, 255], warm: [180, 200, 255], sky: [3, 5, 16],  dens: 0.55, cam: 0.22, grid: 0.35 },
-    { accent: [255, 196, 74], sub: [120, 240, 255], warm: [255, 232, 190], sky: [18, 10, 8], dens: 2.05, cam: 1.70, grid: 2.30 },
+    // 0 イントロ: 冷たいシアン（Rez の導入部 205°）
+    { accent: [72, 186, 255], sub: [255, 96, 72], warm: [170, 214, 255], sky: [3, 7, 14],  dens: 0.70, cam: 0.35, grid: 0.55 },
+    // 1 ビルド: 赤へ傾く琥珀（30-40°）
+    { accent: [255, 146, 52], sub: [90, 190, 255], warm: [255, 198, 140], sky: [12, 6, 6],  dens: 1.10, cam: 0.75, grid: 1.00 },
+    // 2 ドロップ: 錆びた赤 = 本編の支配色（12°）
+    { accent: [255, 68, 44], sub: [64, 208, 255], warm: [255, 150, 110], sky: [14, 4, 4],   dens: 1.65, cam: 1.35, grid: 1.85 },
+    // 3 ブレイク: 翠（136-159°）
+    { accent: [56, 240, 168], sub: [255, 92, 72], warm: [170, 255, 214], sky: [2, 10, 9],   dens: 0.50, cam: 0.22, grid: 0.35 },
+    // 4 ラストドロップ: 桃(346°) と 青(245°) が混ざる終盤
+    { accent: [255, 74, 150], sub: [96, 120, 255], warm: [255, 176, 208], sky: [10, 4, 14], dens: 2.00, cam: 1.70, grid: 2.30 },
   ];
 
   let bgW = 0, bgH = 0, bgInit = false;
@@ -833,6 +842,35 @@ const Effects = (() => {
       ctx.restore();
     }
 
+    // ---- 8.5 放射状のスピードライン（Rez の「網の中を突き進む」感） ----
+    // 中心から外へ伸びる細い光条。拍で伸び、セクションが上がるほど密度が増す。
+    {
+      const n = Math.round(26 + dens * 26);
+      const reach = Math.max(w, h) * 0.62;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "round";
+      for (let i = 0; i < n; i++) {
+        // 疑似乱数を i から作り、フレーム間で位置を固定する
+        const seed = Math.sin(i * 12.9898) * 43758.5453;
+        const rnd = seed - Math.floor(seed);
+        const ang = (i / n) * Math.PI * 2 + rnd * 0.7 + time * 0.06;
+        const ph = (time * (0.22 + rnd * 0.5) + rnd) % 1;   // 0→1 で外へ抜ける
+        const r0 = reach * (0.10 + ph * 0.92);
+        const len = reach * (0.05 + ph * 0.20) * (0.6 + pulse * 0.9);
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        const a = (1 - ph) * ph * 4 * (0.16 + pulse * 0.26) * dens;
+        if (a <= 0.004) continue;
+        ctx.strokeStyle = rgba(rnd > 0.82 ? curSub : curAccent, Math.min(0.5, a));
+        ctx.lineWidth = 0.6 + rnd * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(cx0 + ca * r0, cy0 + sa * r0 * 0.78);
+        ctx.lineTo(cx0 + ca * (r0 + len), cy0 + sa * (r0 + len) * 0.78);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // ---- 9. 走査ライン（ビネットは CSS 側）----
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
@@ -843,6 +881,28 @@ const Effects = (() => {
     ctx.restore();
 
     ctx.restore();  // カメラ変換を解除（以降は画面座標）
+
+    // ---- 9.5 カラーグレード ----
+    // Rez は明色の 63.6% が赤系で、平均輝度 0.133。背景の建物や空だけでは
+    // 画面全体の色が動かないので、セクションの色で環境光を足して画面ごと染める。
+    {
+      const amb = 0.055 + curDens * 0.055 + pulse * 0.022;
+      const gg = ctx.createRadialGradient(cx0, cy0 * 1.06, 0, cx0, cy0, Math.max(w, h) * 0.74);
+      gg.addColorStop(0.0, rgba(curAccent, amb * 1.45));
+      gg.addColorStop(0.55, rgba(curAccent, amb * 0.72));
+      gg.addColorStop(1.0, rgba(curAccent, amb * 0.18));
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = gg;
+      ctx.fillRect(0, 0, w, h);
+      // 補色側をごく薄く入れて単調さを避ける（Rez も赤の中に青緑が差す）
+      const sg = ctx.createLinearGradient(0, 0, w, h);
+      sg.addColorStop(0, rgba(curSub, amb * 0.20));
+      sg.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = sg;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
 
     // ---- 10. セクション転換の閃光 + 収束リング ----
     if (secFlash > 0) {
