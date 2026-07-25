@@ -235,6 +235,7 @@ function init() {
   startTimeMs = performance.now();
   nextPiece = randomCells();
   Effects.reset();
+  Effects.setBurstReady(false);
   GameAudio.setIntensity(1);
   spawnPiece();
   updateHud();
@@ -420,7 +421,11 @@ function advanceTimeline() {
     // BURST ゲージ
     if (!burstReady) {
       burstGauge += cleared.length;
-      if (burstGauge >= BURST_MAX) { burstGauge = BURST_MAX; burstReady = true; }
+      if (burstGauge >= BURST_MAX) {
+        burstGauge = BURST_MAX;
+        burstReady = true;
+        onBurstReady();
+      }
     }
 
     settleColumn(c);
@@ -471,11 +476,28 @@ function updateIntensity() {
   dangerLevel = Math.max(0, Math.min(1, (h - 6) / 3));
 }
 
+// ===== BURST 準備完了（ゲージ満タンの瞬間に1回だけ） =====
+function onBurstReady() {
+  GameAudio.playBurstReady();
+  Effects.setBurstReady(true);
+
+  // 見逃しようのないインパクト: 衝撃波・フラッシュ・文字
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  Effects.ring(cx, cy, "#ff5cf0", canvas.width * 0.9);
+  Effects.ring(cx, cy, "#7fffd4", canvas.width * 0.65);
+  Effects.burst(cx, cy, "#ff8cf5", 40, 2.2);
+  Effects.screenFlash(0.55);
+  Effects.screenShake(7);
+  Effects.popup(cx, cy - 40, "BURST READY", "#ff5cf0", true);
+  Effects.popup(cx, cy + 16, "PRESS ENTER", "#bfe9ff");
+}
+
 // ===== BURST 発動 =====
 function triggerBurst() {
   if (!burstReady || gameOver || paused) return;
   burstReady = false;
   burstGauge = 0;
+  Effects.setBurstReady(false);
 
   let cells = [];
   for (let y = 0; y < ROWS; y++)
@@ -529,6 +551,7 @@ function updateHud() {
   const s = Math.floor(elapsedMs / 1000);
   timeEl.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   burstFillEl.style.width = (burstGauge / BURST_MAX * 100) + "%";
+  burstFillEl.classList.toggle("ready", burstReady);
   burstReadyEl.classList.toggle("hidden", !burstReady);
 }
 
@@ -760,6 +783,7 @@ window.LUMINA = {
   get score() { return score; },
   get combo() { return combo; },
   get burstReady() { return burstReady; },
+  get gameOver() { return gameOver; },
   setBoard(grid) {
     board = grid.map((row) => row.slice());
     markMatches();

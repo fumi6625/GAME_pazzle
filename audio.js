@@ -473,6 +473,105 @@ const GameAudio = (() => {
     sweep(t, dur, true, 0.07);
   }
 
+  // ================= メインメロディ =================
+  // A エオリアンの8小節フック。コードは 2小節ずつ Am → F → Dm → Em。
+  // 小節6でトップの B5 に到達して山を作り、小節7で E5 に着地する。
+  // [16分位置, MIDI, 長さ(16分)]
+  const MELODY = [
+    [[0, 76, 3], [4, 81, 2], [6, 79, 2], [8, 76, 4], [14, 74, 2]],   // 0 Am  主題
+    [[0, 72, 6], [8, 71, 3], [12, 69, 4]],                            // 1 Am  下降
+    [[0, 77, 3], [4, 76, 2], [6, 72, 2], [8, 77, 4], [14, 76, 2]],   // 2 F   主題の応答
+    [[0, 74, 6], [8, 72, 3], [12, 69, 4]],                            // 3 F   下降
+    [[0, 81, 3], [4, 79, 2], [6, 77, 2], [8, 74, 4], [14, 77, 2]],   // 4 Dm  上方へ展開
+    [[0, 76, 6], [8, 74, 3], [12, 72, 4]],                            // 5 Dm
+    [[0, 71, 3], [4, 76, 2], [6, 79, 2], [8, 83, 4], [14, 81, 2]],   // 6 Em  クライマックス
+    [[0, 79, 4], [6, 77, 2], [8, 76, 6]],                             // 7 Em  着地
+  ];
+  // イントロで断片だけ匂わせる小節（フックの予告）
+  const TEASE_BARS = { 5: [0], 6: [0, 3], 7: [0, 2] };
+
+  // リード: デチューン・スーパーソー。サブベースを避けて中高域に置く。
+  function leadV(freq, t, dur, vel = 1, o = {}) {
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.Q.value = o.q ?? 4;
+    const peak = o.cut ?? 4200;
+    lp.frequency.setValueAtTime(peak * 0.55, t);
+    lp.frequency.linearRampToValueAtTime(peak, t + Math.min(0.09, dur * 0.4));
+    lp.frequency.exponentialRampToValueAtTime(Math.max(400, peak * 0.35), t + dur);
+    // サブと衝突しないよう下を削る
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass"; hp.frequency.value = 300;
+
+    const g = ctx.createGain();
+    const amp = 0.075 * vel;
+    const atk = o.atk ?? 0.012;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(amp, t + atk);
+    g.gain.setValueAtTime(amp, t + Math.max(atk, dur * 0.7));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+    // 7声スーパーソー
+    const det = o.det ?? 14;
+    [-det, -det * 0.6, -det * 0.2, 0, det * 0.2, det * 0.6, det].forEach((c, idx) => {
+      const osc = ctx.createOscillator();
+      osc.type = idx === 3 ? "sawtooth" : "sawtooth";
+      osc.frequency.value = freq;
+      osc.detune.value = c;
+      const og = ctx.createGain(); og.gain.value = idx === 3 ? 0.22 : 0.12;
+      osc.connect(og); og.connect(lp);
+      osc.start(t); osc.stop(t + dur + 0.06);
+    });
+    // 芯を出す矩形の1オクターブ下
+    if (o.body) {
+      const osc = ctx.createOscillator();
+      osc.type = "square"; osc.frequency.value = freq / 2;
+      const og = ctx.createGain(); og.gain.value = 0.07;
+      osc.connect(og); og.connect(lp);
+      osc.start(t); osc.stop(t + dur + 0.06);
+    }
+    lp.connect(hp); hp.connect(g);
+    let node = g;
+    if (o.pan !== undefined) { const p = pan(o.pan); g.connect(p); node = p; }
+    node.connect(duck);
+    send(node, delayIn, o.del ?? 0.42);
+    send(node, revIn, o.rev ?? 0.34);
+  }
+
+  // 1小節分のメロディを鳴らす。mode でセクションごとの厚みを変える。
+  function playMelodyStep(bar, i, t, mode) {
+    const evs = MELODY[bar % 8];
+    if (!evs) return;
+    for (const [pos, midi, len] of evs) {
+      if (pos !== i) continue;
+      if (mode === "tease") {
+        const allow = TEASE_BARS[bar % 8];
+        if (!allow || !allow.includes(pos)) continue;
+      }
+      const dur = len * STEP * 0.96;
+      const f = nf(midi);
+      switch (mode) {
+        case "tease":   // イントロ: 断片をディレイの霧の中に
+          leadV(f, t, dur, 0.34, { cut: 1900, del: 0.75, rev: 0.6, atk: 0.05, det: 9 });
+          break;
+        case "build":   // 提示: 控えめ・フィルター閉じ気味
+          leadV(f, t, dur, 0.62, { cut: 3000, del: 0.5, rev: 0.42, det: 12 });
+          break;
+        case "drop":    // 主役: オクターブ重ね
+          leadV(f, t, dur, 1.0, { cut: 5200, body: true, det: 16 });
+          leadV(f * 2, t, dur, 0.34, { cut: 7000, del: 0.3, rev: 0.3, det: 20 });
+          break;
+        case "break":   // 叙情: 単音・深い残響
+          leadV(f, t, dur * 1.25, 0.78, { cut: 2600, del: 0.8, rev: 0.95, atk: 0.06, det: 10 });
+          break;
+        case "final":   // 最厚: 3度ハモリ + オクターブ上下
+          leadV(f, t, dur, 1.0, { cut: 6800, body: true, det: 18, pan: -0.16 });
+          leadV(nf(midi + 3), t, dur, 0.5, { cut: 5200, det: 16, pan: 0.3, del: 0.3 });
+          leadV(f * 2, t, dur, 0.42, { cut: 8000, det: 22, rev: 0.28 });
+          break;
+      }
+    }
+  }
+
   // ================= セクション別シーケンス =================
   function applyTone(t, bar) {
     const s = sectionOfBar(bar);
@@ -589,6 +688,17 @@ const GameAudio = (() => {
         (name === "intro" && bar % 4 === 3 && i === 12)) {
       stab(chord, t, isDrop ? 1 : 0.7);
     }
+
+    // ---------- メインメロディ ----------
+    // イントロ=断片 / ビルド=提示 / ドロップ=主役 / ブレイク=叙情 / ラスト=最厚
+    let mel = null;
+    if (name === "intro" && bar >= 5) mel = "tease";
+    else if (name === "build") mel = "build";
+    else if (name === "drop") mel = bar >= 24 ? "drop" : "build";
+    else if (name === "break") mel = bar >= 34 ? "break" : null;
+    else if (name === "build2") mel = "build";
+    else if (big) mel = "final";
+    if (mel) playMelodyStep(bar, i, t, mel);
 
     // ---------- 展開用 FX / フィル ----------
     const bigCrash = bar === 0 || bar === 16 || bar === 32 || bar === 48;
@@ -777,6 +887,29 @@ const GameAudio = (() => {
   }
 
   // BURST: ライザー → 次の拍でインパクト + リバースシンバル
+  // BURST ゲージ満タン: 「準備完了」を明確に知らせる上昇フレーズ
+  // 曲のキー(A エオリアン)に乗せ、拍頭にクオンタイズして曲を壊さない。
+  function playBurstReady() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    const g0 = beatGrid(0.04);
+    // 駆け上がり: A → C → E → A → C → E（16分）
+    const climb = [69, 72, 76, 81, 84, 88];
+    climb.forEach((m, k) => {
+      const t = g0 + k * STEP;
+      bell(nf(m), t, 0.55, 0.13 + k * 0.012, sfxBus, { rev: 0.75, del: 0.3, pan: -0.4 + k * 0.16 });
+      leadV(nf(m), t, STEP * 1.6, 0.30, { cut: 6000, det: 18, rev: 0.4, del: 0.35 });
+    });
+    // 到達点: きらめきと緊張感のあるサステイン
+    const top = g0 + climb.length * STEP;
+    [81, 84, 88, 93].forEach((m, k) =>
+      bell(nf(m), top + k * 0.035, 1.5, 0.11, sfxBus, { rev: 1.0, del: 0.4 }));
+    leadV(nf(81), top, spb * 2.2, 0.5, { cut: 5000, det: 22, rev: 0.8, del: 0.5, atk: 0.03 });
+    leadV(nf(88), top, spb * 2.2, 0.32, { cut: 6500, det: 24, rev: 0.8, del: 0.5, atk: 0.03 });
+    reverseCymbal(t0, Math.max(0.12, top - t0), 0.1);
+    nz(top, 1.2, 0.07, sfxBus, { hp: 6000, rev: 0.9 });
+  }
+
   function playBurst() {
     if (!ctx) return;
     const t0 = ctx.currentTime;
@@ -837,7 +970,7 @@ const GameAudio = (() => {
     start, stop, beatPhase, barPhase, section, now, secondsPerBeat: spb, setIntensity,
     // 効果音
     playClear, playLock, playSquare, playCombo, playBurst, playGameOver,
-    playRotate, playMove, playDrop,
+    playRotate, playMove, playDrop, playBurstReady,
     // ミュート
     toggleMute, isMuted,
     // 参考情報

@@ -304,11 +304,16 @@ const Effects = (() => {
   // =========================================================================
   const HORIZON = 0.66;
 
-  // セクション別のトーン（0=A シアン / 1=B マゼンタ / 2=C アンバー）
+  // セクション別のトーン。BGM の section() が返す 0..4 に 1:1 対応させ、
+  // シーンが「別物」に見えるレベルで配色・密度・カメラを振り分ける。
+  //   0=イントロ(静寂の青) 1=ビルド(マゼンタに紅潮) 2=ドロップ(ネオン爆発)
+  //   3=ブレイク(深い霧の藍) 4=ラストドロップ(白熱の金)
   const SECTIONS = [
-    { accent: [80, 225, 255], sub: [255, 90, 200], warm: [255, 206, 148], sky: [5, 9, 18], dens: 1.00 },
-    { accent: [255, 86, 208], sub: [110, 220, 255], warm: [255, 190, 160], sky: [10, 6, 20], dens: 1.18 },
-    { accent: [255, 172, 66], sub: [96, 232, 255], warm: [255, 218, 168], sky: [14, 9, 13], dens: 1.36 },
+    { accent: [80, 225, 255], sub: [255, 90, 200], warm: [255, 206, 148], sky: [5, 9, 18],  dens: 0.78, cam: 0.35, grid: 0.55 },
+    { accent: [255, 86, 208], sub: [110, 220, 255], warm: [255, 190, 160], sky: [12, 6, 24], dens: 1.20, cam: 0.75, grid: 1.00 },
+    { accent: [120, 255, 236], sub: [255, 70, 190], warm: [200, 240, 255], sky: [4, 14, 22], dens: 1.75, cam: 1.35, grid: 1.85 },
+    { accent: [70, 130, 255], sub: [130, 180, 255], warm: [180, 200, 255], sky: [3, 5, 16],  dens: 0.55, cam: 0.22, grid: 0.35 },
+    { accent: [255, 196, 74], sub: [120, 240, 255], warm: [255, 232, 190], sky: [18, 10, 8], dens: 2.05, cam: 1.70, grid: 2.30 },
   ];
 
   let bgW = 0, bgH = 0, bgInit = false;
@@ -324,6 +329,11 @@ const Effects = (() => {
   let curSub = SECTIONS[0].sub.slice();
   let curSky = SECTIONS[0].sky.slice();
   let curDens = 1;
+  let curCam = 0.35, curGrid = 0.55;   // カメラの振れ幅 / グリッド流速
+  let prevSecId = -1;
+  let secFlash = 0;                    // セクション転換の閃光
+  let burstReadyOn = false;            // BURST 準備完了の常時演出
+  let burstReadyT = 0;
   let gridScroll = 0;
   let backdrop = null, backdropKey = "";
 
@@ -601,7 +611,7 @@ const Effects = (() => {
   function drawBackground(ctx, w, h, dt, beat, intensity = 1) {
     if (!bgInit || w !== bgW || h !== bgH) { initBg(w, h); if (!bgInit) return; }
     time += dt;
-    gridScroll = (gridScroll + dt * 1.4) % 16;
+    gridScroll = (gridScroll + dt * 1.4 * curGrid) % 16;
 
     // 拍の検出
     const pulse = Math.pow(1 - beat, 3);
@@ -610,13 +620,40 @@ const Effects = (() => {
     barPulse = Math.max(0, barPulse - dt * 1.6);
 
     // セクションでトーンを段階変化
-    const sec = SECTIONS[(typeof GameAudio !== "undefined" && GameAudio.section ? GameAudio.section() : 0) % 3];
+    const secId = (typeof GameAudio !== "undefined" && GameAudio.section
+      ? GameAudio.section() : 0) % SECTIONS.length;
+    const sec = SECTIONS[secId];
+
+    // セクションが切り替わった瞬間 = 曲の展開点。閃光で「場面転換」を叩きつける
+    if (secId !== prevSecId) {
+      if (prevSecId >= 0) secFlash = (secId === 2 || secId === 4) ? 1 : 0.45;
+      prevSecId = secId;
+    }
+    secFlash = Math.max(0, secFlash - dt * 1.5);
+
     const k = Math.min(1, dt * 0.9);
     curAccent = mix(curAccent, sec.accent, k);
     curSub = mix(curSub, sec.sub, k);
     curSky = mix(curSky, sec.sky, k);
     curDens = lerp(curDens, sec.dens * (0.72 + intensity * 0.2), k);
-    const dens = curDens;
+    curCam = lerp(curCam, sec.cam, k);
+    curGrid = lerp(curGrid, sec.grid, k);
+    const dens = curDens * (1 + secFlash * 0.5);
+
+    // ---- カメラ: ゆっくりしたパン / ドリー / ロール ----
+    // セクションが上がるほど振れ幅が増え、転換時にドンと寄る。
+    // 1.05 倍のオーバースキャンで縁が欠けないようにする。
+    const cx0 = w / 2, cy0 = h / 2;
+    const panX = Math.sin(time * 0.13) * 16 * curCam;
+    const panY = Math.cos(time * 0.09) * 9 * curCam;
+    const roll = Math.sin(time * 0.047) * 0.007 * curCam;
+    const zoom = 1.05 + Math.sin(time * 0.11) * 0.022 * curCam
+               + pulse * 0.008 * curCam + secFlash * 0.035;
+    ctx.save();
+    ctx.translate(cx0 + panX, cy0 + panY);
+    ctx.rotate(roll);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-cx0, -cy0);
 
     // ---- 1. 空 + 路面のベース（キャッシュ済みバックドロップを 1:1 転送）----
     updateBackdrop(w, h);
@@ -804,7 +841,77 @@ const Effects = (() => {
     ctx.fillRect(0, scanY, w, 2);
     ctx.fillRect(0, (scanY + h * 0.5) % h, w, 1);
     ctx.restore();
+
+    ctx.restore();  // カメラ変換を解除（以降は画面座標）
+
+    // ---- 10. セクション転換の閃光 + 収束リング ----
+    if (secFlash > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = rgba(curAccent, secFlash * 0.20);
+      ctx.fillRect(0, 0, w, h);
+      // 外から中心へ収束する衝撃波
+      const rr = (1 - secFlash) * Math.max(w, h) * 0.75;
+      ctx.strokeStyle = rgba(curAccent, secFlash * 0.5);
+      ctx.lineWidth = 2 + secFlash * 6;
+      ctx.beginPath();
+      ctx.arc(cx0, cy0, Math.max(1, Math.max(w, h) * 0.75 - rr), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ---- 11. BURST 準備完了: 画面周縁の脈動オーラ ----
+    if (burstReadyOn || burstReadyT > 0) {
+      burstReadyT = burstReadyOn
+        ? Math.min(1, burstReadyT + dt * 2.2)
+        : Math.max(0, burstReadyT - dt * 2.2);
+      const throb = 0.55 + 0.45 * Math.sin(time * 5.4);
+      const a = burstReadyT * (0.48 + throb * 0.46);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      // 周縁のリム（中心は完全に透明 → プレイの邪魔をしない）
+      const rim = ctx.createRadialGradient(cx0, cy0, Math.min(w, h) * 0.27,
+                                           cx0, cy0, Math.max(w, h) * 0.60);
+      rim.addColorStop(0, "rgba(255,92,240,0)");
+      rim.addColorStop(0.45, `rgba(255,92,240,${(a * 0.16).toFixed(3)})`);
+      rim.addColorStop(0.78, `rgba(255,92,240,${(a * 0.52).toFixed(3)})`);
+      rim.addColorStop(1, `rgba(255,150,250,${a.toFixed(3)})`);
+      ctx.fillStyle = rim;
+      ctx.fillRect(0, 0, w, h);
+      // 画面四辺の帯（周辺視野で必ず捉えられる）
+      const bw = Math.min(w, h) * 0.09;
+      const edge = burstReadyT * (0.30 + throb * 0.45);
+      const bands = [
+        [0, 0, w, bw, 0, 0, 0, bw], [0, h - bw, w, bw, 0, h, 0, h - bw],
+        [0, 0, bw, h, 0, 0, bw, 0], [w - bw, 0, bw, h, w, 0, w - bw, 0],
+      ];
+      for (const [x, y, bwd, bht, gx0, gy0, gx1, gy1] of bands) {
+        const gr = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+        gr.addColorStop(0, `rgba(255,120,245,${edge.toFixed(3)})`);
+        gr.addColorStop(1, "rgba(255,120,245,0)");
+        ctx.fillStyle = gr;
+        ctx.fillRect(x, y, bwd, bht);
+      }
+      // 内向きに吸い寄せられるエネルギー粒
+      const n = 26;
+      for (let i = 0; i < n; i++) {
+        const ang = (i / n) * Math.PI * 2 + time * 0.5;
+        const ph = (time * 0.85 + i / n) % 1;          // 1→0 で中心へ
+        const rad = Math.max(w, h) * (0.60 - ph * 0.34);
+        const px = cx0 + Math.cos(ang) * rad;
+        const py = cy0 + Math.sin(ang) * rad * 0.72;
+        ctx.globalAlpha = burstReadyT * (1 - ph) * 0.85;
+        ctx.fillStyle = "#ffa8f7";
+        ctx.beginPath();
+        ctx.arc(px, py, 1.6 + (1 - ph) * 2.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
   }
+
+  // BURST ゲージ満タンの常時演出 ON/OFF
+  function setBurstReady(on) { burstReadyOn = !!on; }
 
   function reset() {
     particles.length = 0;
@@ -813,10 +920,12 @@ const Effects = (() => {
     popups.length = 0;
     columns.length = 0;
     flash = 0; shake = 0;
+    burstReadyOn = false; burstReadyT = 0;
   }
 
   return {
     burst, shatter, ring, column, popup, screenFlash, screenShake,
     update, drawForeground, drawBackground, getShake, reset, initBg,
+    setBurstReady,
   };
 })();
