@@ -3,7 +3,7 @@
  * HTML + Canvas + Web Audio（ビルド不要）
  *
  * ゲームの流れ:
- *  - 2色の 2x2 ブロックが落下（←→移動 / ↑回転 / ↓落下 / Space ハードドロップ）
+ *  - 2色の 2x2 ブロックが落下（←→移動 / Space 回転 / ↑ 即落下 / ↓ ソフトドロップ）
  *  - 同色が 2x2 の正方形になると「消去待ち」フラグ
  *  - タイムライン（音楽に同期して左→右）が通過した列でフラグ付きセルを消去
  *  - 連続スイープで消し続けると COMBO 倍率アップ、大量消しで BONUS
@@ -193,17 +193,33 @@ function collides(x, y, cells) {
 // ===== 操作 =====
 function move(dx) {
   if (!current || gameOver || paused) return;
-  if (!collides(current.x + dx, current.y, current.cells)) current.x += dx;
+  if (!collides(current.x + dx, current.y, current.cells)) {
+    current.x += dx;
+    GameAudio.playMove(dx);
+  }
 }
 function rotate() {
   if (!current || gameOver || paused) return;
   const c = current.cells;
   const rotated = [[c[1][0], c[0][0]], [c[1][1], c[0][1]]];
-  if (!collides(current.x, current.y, rotated)) current.cells = rotated;
+  if (!collides(current.x, current.y, rotated)) {
+    current.cells = rotated;
+    GameAudio.playRotate();
+    // 回転は「音を回す」動作: ピース中心にリングを出す
+    const { cx, cy } = cellCenter(current.x + 0.5, Math.max(0, current.y) + 0.5);
+    Effects.ring(cx, cy, "rgba(150,230,255,1)", CELL * 1.6);
+  }
 }
 function hardDrop() {
   if (!current || gameOver || paused) return;
+  const from = current.y;
   while (!collides(current.x, current.y + 1, current.cells)) current.y++;
+  if (current.y > from) {
+    GameAudio.playDrop();
+    // 落下の軌跡（残像トレイル）
+    const { cx } = cellCenter(current.x + 0.5, 0);
+    Effects.column(cx, CELL * 2, (current.y + 2) * CELL, "rgba(200,240,255,ALPHA)");
+  }
   lockPiece();
 }
 function stepDown() {
@@ -642,9 +658,9 @@ document.addEventListener("keydown", (e) => {
   switch (e.key) {
     case "ArrowLeft": move(-1); e.preventDefault(); break;
     case "ArrowRight": move(1); e.preventDefault(); break;
-    case "ArrowUp": rotate(); e.preventDefault(); break;
+    case "ArrowUp": hardDrop(); e.preventDefault(); break;      // ↑ = 即座に落下
     case "ArrowDown": softDrop = true; e.preventDefault(); break;
-    case " ": hardDrop(); e.preventDefault(); break;
+    case " ": rotate(); e.preventDefault(); break;              // Space = 回転
     case "Enter": triggerBurst(); e.preventDefault(); break;
     case "p": case "P": if (!gameOver) paused = !paused; break;
     case "r": case "R": init(); break;
