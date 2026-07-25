@@ -20,9 +20,10 @@ const EMPTY = 0;
 const COLOR_A = 1;
 const COLOR_B = 2;
 
+// 背景のネオン（シアン/マゼンタ）と同じ色域に揃える
 const COLORS = {
-  [COLOR_A]: { base: "#1b3fbf", light: "#3f8bff", core: "#bfe3ff", glow: "#57b1ff" },
-  [COLOR_B]: { base: "#c31677", light: "#ff4fae", core: "#ffd2ec", glow: "#ff6ec7" },
+  [COLOR_A]: { deep: "#03202f", base: "#0c6d97", light: "#5ce4ff", core: "#e2fbff", glow: "#5ce4ff" },
+  [COLOR_B]: { deep: "#2b0620", base: "#a01463", light: "#ff5cc8", core: "#ffe0f4", glow: "#ff5cc8" },
 };
 
 const GRAVITY_INTERVAL = 620;   // ms: ピース落下
@@ -87,6 +88,35 @@ function roundRectPath(c, x, y, w, h, r) {
   c.closePath();
 }
 
+// hex → [r,g,b] / 2色の線形補間
+function hexRgb(h) {
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
+function mixHex(a, b, t) {
+  const A = hexRgb(a), B = hexRgb(b);
+  return `rgb(${Math.round(A[0] + (B[0] - A[0]) * t)},${Math.round(A[1] + (B[1] - A[1]) * t)},${Math.round(A[2] + (B[2] - A[2]) * t)})`;
+}
+
+// 面取り八角形の頂点（中心へ scale 倍して内側テーブルにも使う）
+function facetPoints(size, pad, chamfer, scale) {
+  const p = pad, q = size - pad, c = chamfer, m = size / 2;
+  const pts = [
+    [p + c, p], [q - c, p], [q, p + c], [q, q - c],
+    [q - c, q], [p + c, q], [p, q - c], [p, p + c],
+  ];
+  return pts.map(([x, y]) => [m + (x - m) * scale, m + (y - m) * scale]);
+}
+function polyPath(c, pts) {
+  c.beginPath();
+  pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+  c.closePath();
+}
+
+/*
+ * カット済みクリスタルのブロック。
+ * 面取り八角形の外周と内側テーブルの間に8枚のベベル面を張り、
+ * 各面の向きと光源(左上)の内積で明暗を付けて立体を出す。
+ */
 function blockSprite(color, size) {
   const key = color + "_" + size;
   if (spriteCache[key]) return spriteCache[key];
@@ -94,45 +124,90 @@ function blockSprite(color, size) {
   s.width = s.height = size;
   const c = s.getContext("2d");
   const col = COLORS[color];
-  const pad = 2, r = size * 0.2;
+  const pad = Math.max(1.5, size * 0.045);
+  const chamfer = size * 0.2;
+  const m = size / 2;
+  const LX = -0.6, LY = -0.8;              // 光源方向（左上）
 
-  // 本体: 左上から光が差すラジアルグラデ
-  const g = c.createRadialGradient(size * 0.32, size * 0.26, 2, size * 0.5, size * 0.6, size * 0.85);
-  g.addColorStop(0, col.core);
-  g.addColorStop(0.4, col.light);
-  g.addColorStop(1, col.base);
-  roundRectPath(c, pad, pad, size - pad * 2, size - pad * 2, r);
-  c.fillStyle = g;
+  const outer = facetPoints(size, pad, chamfer, 1);
+  const inner = facetPoints(size, pad, chamfer, 0.56);
+
+  // --- ベベル面 8枚 ---
+  for (let i = 0; i < 8; i++) {
+    const j = (i + 1) % 8;
+    const quad = [outer[i], outer[j], inner[j], inner[i]];
+    // 面の外向き方向 ≒ 外周エッジ中点の中心からの向き
+    const mx = (outer[i][0] + outer[j][0]) / 2 - m;
+    const my = (outer[i][1] + outer[j][1]) / 2 - m;
+    const len = Math.hypot(mx, my) || 1;
+    const lam = (mx / len) * LX + (my / len) * LY;   // -1..1
+    const t = Math.pow(Math.max(0, lam * 0.5 + 0.5), 1.5);
+    polyPath(c, quad);
+    c.fillStyle = t > 0.62
+      ? mixHex(col.light, col.core, (t - 0.62) / 0.38)
+      : mixHex(col.deep, col.light, t / 0.62);
+    c.fill();
+  }
+
+  // --- 内側テーブル（屈折感のある斜めグラデ） ---
+  const tg = c.createLinearGradient(size * 0.2, size * 0.15, size * 0.85, size * 0.9);
+  tg.addColorStop(0, col.light);
+  tg.addColorStop(0.42, col.base);
+  tg.addColorStop(0.72, mixHex(col.base, col.deep, 0.55));
+  tg.addColorStop(1, mixHex(col.base, col.light, 0.35));
+  polyPath(c, inner);
+  c.fillStyle = tg;
   c.fill();
 
-  // 底面の陰影
-  const g2 = c.createLinearGradient(0, size * 0.55, 0, size);
-  g2.addColorStop(0, "rgba(0,0,0,0)");
-  g2.addColorStop(1, "rgba(5,0,25,0.4)");
-  roundRectPath(c, pad, pad, size - pad * 2, size - pad * 2, r);
-  c.fillStyle = g2;
-  c.fill();
-
-  // ガラスの艶（上部ハイライト）
-  const g3 = c.createLinearGradient(0, pad, 0, size * 0.46);
-  g3.addColorStop(0, "rgba(255,255,255,0.6)");
-  g3.addColorStop(1, "rgba(255,255,255,0.02)");
-  roundRectPath(c, pad + 3, pad + 2.5, size - pad * 2 - 6, size * 0.36, r * 0.7);
-  c.fillStyle = g3;
-  c.fill();
-
-  // 内側の輝点
-  const g4 = c.createRadialGradient(size * 0.3, size * 0.3, 0, size * 0.3, size * 0.3, size * 0.22);
-  g4.addColorStop(0, "rgba(255,255,255,0.5)");
-  g4.addColorStop(1, "rgba(255,255,255,0)");
-  c.fillStyle = g4;
+  // テーブルを斜めに割る稜線（カットの分割線）
+  c.save();
+  polyPath(c, inner); c.clip();
+  c.strokeStyle = "rgba(255,255,255,0.16)";
+  c.lineWidth = Math.max(0.6, size * 0.018);
+  c.beginPath(); c.moveTo(pad, size * 0.72); c.lineTo(size * 0.72, pad); c.stroke();
+  // 鋭いスペキュラの筋
+  const sp = c.createLinearGradient(size * 0.18, size * 0.34, size * 0.52, size * 0.06);
+  sp.addColorStop(0, "rgba(255,255,255,0)");
+  sp.addColorStop(0.5, "rgba(255,255,255,0.55)");
+  sp.addColorStop(1, "rgba(255,255,255,0)");
+  c.fillStyle = sp;
   c.fillRect(0, 0, size, size);
+  c.restore();
 
-  // 縁
-  roundRectPath(c, pad + 0.5, pad + 0.5, size - pad * 2 - 1, size - pad * 2 - 1, r);
-  c.strokeStyle = "rgba(255,255,255,0.25)";
-  c.lineWidth = 1;
+  // --- 発光（暗いシーンで自発光ガラスに見せる） ---
+  c.save();
+  c.globalCompositeOperation = "lighter";
+  const gl = c.createRadialGradient(m, m, 0, m, m, size * 0.5);
+  gl.addColorStop(0, col.glow + "38");
+  gl.addColorStop(1, "rgba(0,0,0,0)");
+  polyPath(c, outer); c.clip();
+  c.fillStyle = gl;
+  c.fillRect(0, 0, size, size);
+  c.restore();
+
+  // --- 稜線（面の境界を細く光らせる） ---
+  c.strokeStyle = "rgba(255,255,255,0.10)";
+  c.lineWidth = Math.max(0.5, size * 0.014);
+  for (let i = 0; i < 8; i++) {
+    c.beginPath();
+    c.moveTo(outer[i][0], outer[i][1]);
+    c.lineTo(inner[i][0], inner[i][1]);
+    c.stroke();
+  }
+
+  // --- 外周: 左上は明るいリムライト、右下は接地の影 ---
+  polyPath(c, outer);
+  c.strokeStyle = "rgba(255,255,255,0.30)";
+  c.lineWidth = Math.max(0.6, size * 0.02);
   c.stroke();
+  c.save();
+  polyPath(c, outer); c.clip();
+  const rim = c.createLinearGradient(0, size, size, 0);
+  rim.addColorStop(0, "rgba(0,0,0,0.42)");
+  rim.addColorStop(0.45, "rgba(0,0,0,0)");
+  c.fillStyle = rim;
+  c.fillRect(0, 0, size, size);
+  c.restore();
 
   spriteCache[key] = s;
   return s;
@@ -475,16 +550,20 @@ function drawCell(c, x, y, color, size, opts = {}) {
   if (opts.marked) {
     // 消去待ち: 白枠 + グローのパルス
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 110);
-    const px = x * size, py = y * size, pad = 2;
+    const px = x * size, py = y * size;
     c.save();
     c.globalCompositeOperation = "lighter";
     c.globalAlpha = 0.25 + pulse * 0.3;
     c.drawImage(blockSprite(color, size), px, py);
     c.restore();
+    // 面取り八角形に沿った白枠のパルス
+    c.save();
+    c.translate(px, py);
+    polyPath(c, facetPoints(size, Math.max(1.5, size * 0.045) + 1, size * 0.2, 1));
     c.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.5})`;
     c.lineWidth = 2;
-    roundRectPath(c, px + pad + 1, py + pad + 1, size - pad * 2 - 2, size - pad * 2 - 2, size * 0.16);
     c.stroke();
+    c.restore();
   }
 }
 
