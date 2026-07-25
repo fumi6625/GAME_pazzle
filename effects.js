@@ -130,6 +130,22 @@ const Effects = (() => {
     popups.push({ x, y, text, color, life: 1.2, age: 0, big });
   }
 
+  // 加点のフロート表示（消えた場所から数字が舞い上がる）
+  const floats = [];
+  function scorePop(x, y, text, color, scale = 1) {
+    floats.push({
+      x, y, text, color, scale,
+      vx: (Math.random() - 0.5) * 46, vy: -74 - Math.random() * 34,
+      life: 0.95 + scale * 0.25, age: 0,
+    });
+  }
+
+  // 範囲の強調（BURST が薙ぎ払った領域など「何が起きたか」を見せる）
+  const zones = [];
+  function zone(x, y, w, h, color) {
+    zones.push({ x, y, w, h, color, life: 0.9, age: 0 });
+  }
+
   function screenFlash(v) { flash = Math.max(flash, v); }
   function screenShake(v) { shake = Math.max(shake, v); }
 
@@ -167,6 +183,20 @@ const Effects = (() => {
       p.age += dt;
       if (p.age >= p.life) { popups.splice(i, 1); continue; }
       p.y -= (p.big ? 12 : 28) * dt;
+    }
+    for (let i = floats.length - 1; i >= 0; i--) {
+      const f = floats[i];
+      f.age += dt;
+      if (f.age >= f.life) { floats.splice(i, 1); continue; }
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.vy += 118 * dt;   // 上昇して失速する
+      f.vx *= 1 - 1.6 * dt;
+    }
+    for (let i = zones.length - 1; i >= 0; i--) {
+      const z = zones[i];
+      z.age += dt;
+      if (z.age >= z.life) zones.splice(i, 1);
     }
     if (flash > 0) flash = Math.max(0, flash - dt * 2.4);
     if (shake > 0) shake = Math.max(0, shake - dt * 42);
@@ -283,7 +313,58 @@ const Effects = (() => {
       if (ls) ctx.letterSpacing = "0px";
       ctx.restore();
     }
+
+    // 加点フロート（爽快感の核。弾んで出て、光りながら舞い上がる）
+    for (const f of floats) {
+      const t = 1 - f.age / f.life;
+      const pop = 1 - Math.pow(1 - Math.min(1, f.age * 9), 3);   // 出た瞬間に弾む
+      const sc = f.scale * (0.5 + pop * 0.72);
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.scale(sc, sc);
+      ctx.font = `800 26px "Helvetica Neue", Arial, system-ui, sans-serif`;
+      ctx.globalAlpha = Math.min(1, t * 2.2);
+      // 縁取りで背景に負けないようにする
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.strokeText(f.text, 0, 0);
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(f.text, 0, 0);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = Math.min(1, t * 2.2) * 0.85;
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, 0, 0);
+      ctx.restore();
+    }
     ctx.restore();
+
+    // 範囲の強調（BURST の薙ぎ払い領域）
+    for (const z of zones) {
+      const t = 1 - z.age / z.life;
+      const e = 1 - Math.pow(1 - z.age / z.life, 2);
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = t;
+      const g = ctx.createLinearGradient(0, z.y, 0, z.y + z.h);
+      g.addColorStop(0, "rgba(255,255,255,0)");
+      g.addColorStop(0.5, z.color);
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(z.x, z.y, z.w, z.h);
+      // 領域を左→右へ走る光の刃
+      const sx = z.x + z.w * e;
+      const blade = ctx.createLinearGradient(sx - 60, 0, sx, 0);
+      blade.addColorStop(0, "rgba(255,255,255,0)");
+      blade.addColorStop(1, `rgba(255,255,255,${(t * 0.85).toFixed(3)})`);
+      ctx.fillStyle = blade;
+      ctx.fillRect(sx - 60, z.y, 60, z.h);
+      ctx.strokeStyle = `rgba(255,255,255,${(t * 0.9).toFixed(3)})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(z.x, z.y, z.w, z.h);
+      ctx.restore();
+    }
 
     if (flash > 0) {
       ctx.save();
@@ -979,12 +1060,14 @@ const Effects = (() => {
     rings.length = 0;
     popups.length = 0;
     columns.length = 0;
+    floats.length = 0;
+    zones.length = 0;
     flash = 0; shake = 0;
     burstReadyOn = false; burstReadyT = 0;
   }
 
   return {
-    burst, shatter, ring, column, popup, screenFlash, screenShake,
+    burst, shatter, ring, column, popup, scorePop, zone, screenFlash, screenShake,
     update, drawForeground, drawBackground, getShake, reset, initBg,
     setBurstReady,
   };

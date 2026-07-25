@@ -887,6 +887,34 @@ const GameAudio = (() => {
   }
 
   // BURST: ライザー → 次の拍でインパクト + リバースシンバル
+  // レベルアップ: 明るく上へ抜けるファンファーレ（レベルが上がるほど高く）
+  function playLevelUp(lv) {
+    if (!ctx) return;
+    const g0 = beatGrid(0.03);
+    const oct = Math.min(2, Math.floor((lv - 1) / 6));
+    // A メジャー系の明るい響きで「上がった」感を出す
+    [69, 73, 76, 81].forEach((m, k) => {
+      const t = g0 + k * STEP * 0.5;
+      bell(nf(m + oct * 12), t, 0.7, 0.14, sfxBus, { rev: 0.8, del: 0.28, pan: -0.3 + k * 0.2 });
+      leadV(nf(m + oct * 12), t, STEP * 2, 0.42, { cut: 6200, det: 18, rev: 0.5 });
+    });
+    const top = g0 + 2 * STEP;
+    leadV(nf(85 + oct * 12), top, spb * 1.6, 0.55, { cut: 7000, det: 22, rev: 0.7, del: 0.4 });
+    nz(top, 0.9, 0.06, sfxBus, { hp: 7000, rev: 0.8 });
+  }
+
+  // 豪華コマ生成: サイズが大きいほど荘厳に
+  function playGrand(n) {
+    if (!ctx) return;
+    const g0 = beatGrid(0.03);
+    const depth = Math.min(4, n - 2);
+    // 低音の芯 + 倍音の重なりで「大物ができた」重みを出す
+    tone(nf(33), g0, spb * 2, "sine", 0.3, sfxBus, { attack: 0.01 });
+    [57, 64, 69, 76, 81].slice(0, 2 + depth).forEach((m, k) =>
+      bell(nf(m), g0 + k * STEP * 0.34, 1.4, 0.13, sfxBus, { rev: 0.95, del: 0.35 }));
+    metal(g0, 0.6, 0.05 * depth, sfxBus, { base: 440, bp: 5200, hp: 2000, voices: 5, rev: 0.8 });
+  }
+
   // BURST ゲージ満タン: 「準備完了」を明確に知らせる上昇フレーズ
   // 曲のキー(A エオリアン)に乗せ、拍頭にクオンタイズして曲を壊さない。
   function playBurstReady() {
@@ -970,7 +998,7 @@ const GameAudio = (() => {
     start, stop, beatPhase, barPhase, section, now, secondsPerBeat: spb, setIntensity,
     // 効果音
     playClear, playLock, playSquare, playCombo, playBurst, playGameOver,
-    playRotate, playMove, playDrop, playBurstReady,
+    playRotate, playMove, playDrop, playBurstReady, playLevelUp, playGrand,
     // ミュート
     toggleMute, isMuted,
     // 参考情報

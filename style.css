@@ -217,9 +217,17 @@ body {
   text-shadow: 0 0 30px rgba(92, 228, 255, 0.35);
 }
 
-.stat-grid { display: flex; gap: 14px; }
-.stat-grid .stat { flex: 1 1 0; min-width: 0; }
+.stat-grid { display: flex; gap: 10px; }
+/* 幅は中身に合わせて配分する（"SQUARES" は "TIME" より広く要る） */
+.stat-grid .stat { flex: 1 1 auto; min-width: 0; }
 .stat-grid .stat-value { font-size: 17px; }
+/* 3列に詰めると "SQUARES" が桁溢れするので、この行だけ字間と級数を落とす */
+.stat-grid .stat-label {
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+}
 
 /* BURST メーター */
 .burst-wrap {
@@ -241,6 +249,112 @@ body {
   box-shadow: 0 0 12px rgba(255, 92, 200, 0.8);
   transition: width 0.12s linear;
 }
+/* ===== レベル ===== */
+.level-wrap { margin-bottom: 4px; }
+.level-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.level-value {
+  font-size: 26px;
+  font-weight: 200;
+  line-height: 1;
+  color: #7fffd4;
+  text-shadow: 0 0 14px rgba(127, 255, 212, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+.level-mult {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--accent-2);
+  opacity: 0.9;
+}
+.level-bar {
+  margin-top: 5px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.level-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #2ad1a0, #7fffd4);
+  box-shadow: 0 0 10px rgba(127, 255, 212, 0.7);
+  transition: width 0.25s ease-out;
+}
+
+/* ===== ランキング ===== */
+.rank-panel {
+  margin-top: 18px;
+  width: min(390px, 78vw);
+  text-align: left;
+}
+.rank-title {
+  font-size: 9px;
+  letter-spacing: 0.34em;
+  color: var(--muted);
+  margin: 0 0 7px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.rank-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 210px;
+  overflow-y: auto;
+}
+.rank-row {
+  display: grid;
+  grid-template-columns: 26px 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.rank-pos {
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.rank-score {
+  font-size: 16px;
+  font-weight: 300;
+  color: #eaf2ff;
+  font-variant-numeric: tabular-nums;
+}
+.rank-meta {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.rank-row.is-top .rank-score { color: #ffd77a; text-shadow: 0 0 12px rgba(255, 215, 122, 0.45); }
+.rank-row.is-top .rank-pos { color: #ffd77a; }
+/* 今回の記録を強調 */
+.rank-row.is-me {
+  background: linear-gradient(90deg, rgba(255, 92, 240, 0.18), rgba(255, 92, 240, 0));
+  box-shadow: inset 2px 0 0 #ff5cf0;
+  animation: rank-me 1s ease-in-out infinite alternate;
+}
+@keyframes rank-me { from { filter: brightness(1) } to { filter: brightness(1.35) } }
+.rank-empty {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 10px 4px;
+}
+.rank-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+.rank-note.is-in {
+  color: #ffd77a;
+  text-shadow: 0 0 12px rgba(255, 215, 122, 0.5);
+}
+
 /* 満タン: バーが脈打ち、光が走って「溜まった」ことを見逃させない */
 .burst-fill.ready {
   background: linear-gradient(90deg, #ff5cf0, #fff0ff 45%, #7fffd4);

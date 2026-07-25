@@ -26,14 +26,34 @@ const COLORS = {
   [COLOR_B]: { deep: "#2b0620", base: "#a01463", light: "#ff5cc8", core: "#ffe0f4", glow: "#ff5cc8" },
 };
 
-const GRAVITY_INTERVAL = 620;   // ms: ピース落下
+const GRAVITY_INTERVAL = 620;   // ms: ピース落下（レベル1）
 const SOFT_DROP_INTERVAL = 45;
-const BURST_MAX = 30;           // 消したセル数でゲージ満タン
+const BURST_MAX = 72;           // 消したセル数でゲージ満タン（条件を厳しく）
+
+// ===== レベル =====
+const LEVEL_BASE = 2000;        // Lv2 到達に必要な点
+const LEVEL_STEP = 1600;        // 1レベル上がるごとの必要点の増分
+const LEVEL_MULT = 0.2;         // レベルごとの得点係数の増加（Lv1=x1.0, Lv5=x1.8）
+const LEVEL_SPEEDUP = 0.955;    // レベルごとの落下間隔（ほんの少しだけ速く）
+const MIN_GRAVITY = 190;        // 落下間隔の下限
+const MAX_LEVEL = 30;
+
+// ===== 豪華コマ（3x3 以上の同色正方形） =====
+const BIG_MIN = 3;
+const BURST_ROWS = 4;           // BURST が薙ぎ払う最下段からの行数
+const BIG_BONUS = 0.6;          // セル単価の倍率 = 1 + (n-2) * BIG_BONUS
+
+// ===== ランキング =====
+const RANK_KEY = "lumina.arise.ranking.v1";
+const RANK_MAX = 10;
 
 // ===== 状態 =====
 let board, marked;
+let bigSize, bigTop;            // 豪華コマ: 各セルが属する正方形の辺長 / 左上セルの辺長
 let current, nextPiece;
 let score, squaresCleared, combo, maxCombo;
+let level, nextLevelAt, levelFlash;
+let bestBig;                    // このプレイで作った最大の豪華コマ
 let burstGauge, burstReady;
 let gameOver, paused, running, softDrop;
 let startTimeMs, elapsedMs;
@@ -62,6 +82,12 @@ const burstReadyEl = document.getElementById("burst-ready");
 const startOverlay = document.getElementById("start");
 const overOverlay = document.getElementById("over");
 const overScoreEl = document.getElementById("over-score");
+const levelEl = document.getElementById("level");
+const levelFillEl = document.getElementById("level-fill");
+const levelMultEl = document.getElementById("level-mult");
+const overRankEl = document.getElementById("over-rank");
+const startRankEl = document.getElementById("start-rank");
+const overRankNoteEl = document.getElementById("over-rank-note");
 
 // ===== ユーティリティ =====
 function makeGrid(fill) {
@@ -75,6 +101,122 @@ function cellCenter(x, y) {
   return { cx: x * CELL + CELL / 2, cy: y * CELL + CELL / 2 };
 }
 function colPan(x) { return (x / (COLS - 1)) * 1.6 - 0.8; }
+
+// ===== レベル =====
+// 得点が閾値を越えるたびに1段階ずつ上がる。上がるほど得点係数が伸び、
+// 落下間隔がわずかに縮んで難度が上がる。
+function levelNeed(l) { return LEVEL_BASE + (l - 1) * LEVEL_STEP; }
+function levelMult() { return 1 + (level - 1) * LEVEL_MULT; }
+function gravityInterval() {
+  return Math.max(MIN_GRAVITY, GRAVITY_INTERVAL * Math.pow(LEVEL_SPEEDUP, level - 1));
+}
+function checkLevelUp() {
+  let rose = false;
+  while (level < MAX_LEVEL && score >= nextLevelAt) {
+    level++;
+    nextLevelAt += levelNeed(level);
+    rose = true;
+  }
+  if (rose) {
+    levelFlash = 1;
+    Effects.popup(canvas.width / 2, canvas.height / 2 - 70, "LEVEL " + level, "#7fffd4", true);
+    Effects.popup(canvas.width / 2, canvas.height / 2 - 18,
+      "SCORE x" + levelMult().toFixed(1) + "  /  SPEED UP", "#bfe9ff");
+    Effects.screenFlash(0.45);
+    Effects.screenShake(6);
+    for (let i = 0; i < 3; i++)
+      Effects.ring(canvas.width / 2, canvas.height / 2, "#7fffd4", canvas.width * (0.4 + i * 0.25));
+    GameAudio.playLevelUp(level);
+  }
+}
+
+// ===== 豪華コマの検出 =====
+// 同色の正方形のうち 3x3 以上のものを、大きい順に重ならないよう選び出す。
+// 選ばれた領域は1個の大きな宝石として描画され、消去時の単価も上がる。
+function findBigBlocks() {
+  bigSize = makeGrid(0);
+  bigTop = makeGrid(0);
+
+  // dp[y][x] = (y,x) を右下とする同色正方形の最大辺長
+  const dp = makeGrid(0);
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const v = board[y][x];
+      if (v === EMPTY) continue;
+      if (y === 0 || x === 0) { dp[y][x] = 1; continue; }
+      dp[y][x] = (board[y - 1][x] === v && board[y][x - 1] === v && board[y - 1][x - 1] === v)
+        ? Math.min(dp[y - 1][x], dp[y][x - 1], dp[y - 1][x - 1]) + 1
+        : 1;
+    }
+  }
+
+  const cands = [];
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++)
+      if (dp[y][x] >= BIG_MIN) cands.push({ n: dp[y][x], y, x });
+  cands.sort((a, b) => b.n - a.n);
+
+  for (const c of cands) {
+    const n = c.n, y0 = c.y - n + 1, x0 = c.x - n + 1;
+    let free = true;
+    for (let y = y0; y <= c.y && free; y++)
+      for (let x = x0; x <= c.x; x++) if (bigSize[y][x]) { free = false; break; }
+    if (!free) continue;
+    for (let y = y0; y <= c.y; y++)
+      for (let x = x0; x <= c.x; x++) bigSize[y][x] = n;
+    bigTop[y0][x0] = n;
+    if (n > bestBig) {
+      bestBig = n;
+      const { cx, cy } = cellCenter(x0 + (n - 1) / 2, y0 + (n - 1) / 2);
+      Effects.popup(cx, cy - CELL, n + "×" + n + " GRAND", "#ffe27a", true);
+      Effects.screenFlash(0.3);
+      GameAudio.playGrand(n);
+    }
+  }
+}
+
+// ===== ランキング（localStorage に上位10件） =====
+function loadRanking() {
+  try {
+    const r = JSON.parse(localStorage.getItem(RANK_KEY));
+    return Array.isArray(r) ? r : [];
+  } catch (e) { return []; }
+}
+function saveRanking(entry) {
+  const r = loadRanking();
+  r.push(entry);
+  r.sort((a, b) => b.score - a.score);
+  r.splice(RANK_MAX);
+  try { localStorage.setItem(RANK_KEY, JSON.stringify(r)); } catch (e) { /* 保存不可でも続行 */ }
+  return r;
+}
+// entry が今回の記録なら強調表示する
+function renderRanking(el, list, mark) {
+  if (!el) return;
+  el.innerHTML = "";
+  if (list.length === 0) {
+    const li = document.createElement("li");
+    li.className = "rank-empty";
+    li.textContent = "記録なし — 最初の1件を刻もう";
+    el.appendChild(li);
+    return;
+  }
+  list.forEach((e, i) => {
+    const li = document.createElement("li");
+    li.className = "rank-row" + (mark && e.id === mark ? " is-me" : "") + (i === 0 ? " is-top" : "");
+    const pos = document.createElement("span");
+    pos.className = "rank-pos";
+    pos.textContent = String(i + 1).padStart(2, "0");
+    const sc = document.createElement("span");
+    sc.className = "rank-score";
+    sc.textContent = e.score.toLocaleString();
+    const meta = document.createElement("span");
+    meta.className = "rank-meta";
+    meta.textContent = `Lv${e.level} · ${e.combo}COMBO` + (e.big >= BIG_MIN ? ` · ${e.big}×${e.big}` : "");
+    li.append(pos, sc, meta);
+    el.appendChild(li);
+  });
+}
 
 // ===== ブロックスプライト（ガラス質の宝石ブロックを事前描画） =====
 const spriteCache = {};
@@ -213,14 +355,114 @@ function blockSprite(color, size) {
   return s;
 }
 
+/*
+ * 豪華コマ（3x3 以上の同色正方形）を1個の大きな宝石として描く。
+ * ベースは同じカット済みクリスタルを n セル分の大きさで描き、
+ * その上に金の二重縁・四隅の飾り・中央のきらめきを重ねて「格の違い」を出す。
+ */
+const bigSpriteCache = {};
+function bigBlockSprite(color, n) {
+  const key = color + "_" + n;
+  if (bigSpriteCache[key]) return bigSpriteCache[key];
+  const size = n * CELL;
+  const s = document.createElement("canvas");
+  s.width = s.height = size;
+  const c = s.getContext("2d");
+  const col = COLORS[color];
+  const m = size / 2;
+
+  // --- ベース：大きなクリスタル ---
+  c.drawImage(blockSprite(color, size), 0, 0);
+
+  const pad = Math.max(1.5, size * 0.045);
+  const chamfer = size * 0.2;
+  const outer = facetPoints(size, pad, chamfer, 1);
+
+  // --- 金の二重縁 ---
+  const gold = "#ffd77a", goldDeep = "#a9772a";
+  c.save();
+  polyPath(c, outer);
+  c.strokeStyle = gold;
+  c.lineWidth = Math.max(2, size * 0.018);
+  c.shadowColor = gold;
+  c.shadowBlur = size * 0.06;
+  c.stroke();
+  c.shadowBlur = 0;
+  polyPath(c, facetPoints(size, pad + size * 0.045, chamfer * 0.86, 1));
+  c.strokeStyle = goldDeep;
+  c.lineWidth = Math.max(1, size * 0.008);
+  c.stroke();
+  c.restore();
+
+  // --- 四隅の飾り（L字のブラケット） ---
+  const b = size * 0.16, off = size * 0.085;
+  c.strokeStyle = gold;
+  c.lineWidth = Math.max(1.5, size * 0.014);
+  c.lineCap = "round";
+  [[off, off, 1, 1], [size - off, off, -1, 1],
+   [off, size - off, 1, -1], [size - off, size - off, -1, -1]]
+    .forEach(([x, y, sx, sy]) => {
+      c.beginPath();
+      c.moveTo(x, y + sy * b);
+      c.lineTo(x, y);
+      c.lineTo(x + sx * b, y);
+      c.stroke();
+    });
+
+  // --- 内側の同心リング（大きいほど輪が増える） ---
+  c.save();
+  c.globalCompositeOperation = "lighter";
+  for (let i = 0; i < n - 1; i++) {
+    c.beginPath();
+    c.arc(m, m, size * (0.17 + i * 0.075), 0, Math.PI * 2);
+    c.strokeStyle = `rgba(255,226,140,${0.24 - i * 0.05})`;
+    c.lineWidth = Math.max(1, size * 0.006);
+    c.stroke();
+  }
+  // --- 中央のきらめき（4条の光条） ---
+  const rr = size * 0.30;
+  const star = c.createRadialGradient(m, m, 0, m, m, rr);
+  star.addColorStop(0, "rgba(255,255,255,0.85)");
+  star.addColorStop(0.35, "rgba(255,232,170,0.30)");
+  star.addColorStop(1, "rgba(255,220,140,0)");
+  c.fillStyle = star;
+  c.beginPath(); c.arc(m, m, rr, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = "rgba(255,255,255,0.7)";
+  c.lineWidth = Math.max(1, size * 0.01);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    c.beginPath();
+    c.moveTo(m - Math.cos(a) * rr * 1.15, m - Math.sin(a) * rr * 1.15);
+    c.lineTo(m + Math.cos(a) * rr * 1.15, m + Math.sin(a) * rr * 1.15);
+    c.stroke();
+  }
+  // 全体の底上げ発光
+  const gl = c.createRadialGradient(m, m, 0, m, m, size * 0.55);
+  gl.addColorStop(0, col.glow + "30");
+  gl.addColorStop(1, "rgba(0,0,0,0)");
+  polyPath(c, outer); c.save(); c.clip();
+  c.fillStyle = gl; c.fillRect(0, 0, size, size);
+  c.restore();
+  c.restore();
+
+  bigSpriteCache[key] = s;
+  return s;
+}
+
 // ===== 初期化 =====
 function init() {
   board = makeGrid(EMPTY);
   marked = makeGrid(false);
+  bigSize = makeGrid(0);
+  bigTop = makeGrid(0);
   score = 0;
   squaresCleared = 0;
   combo = 0;
   maxCombo = 0;
+  level = 1;
+  nextLevelAt = levelNeed(1);
+  levelFlash = 0;
+  bestBig = 0;
   burstGauge = 0;
   burstReady = false;
   gameOver = false;
@@ -358,6 +600,7 @@ function markMatches() {
       }
     }
   }
+  findBigBlocks();
   return any && newOne;
 }
 
@@ -368,17 +611,19 @@ function settleColumn(x) {
     if (board[y][x] !== EMPTY) {
       board[write][x] = board[y][x];
       marked[write][x] = marked[y][x];
-      if (write !== y) { board[y][x] = EMPTY; marked[y][x] = false; }
+      bigSize[write][x] = bigSize[y][x];
+      if (write !== y) { board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0; }
       write--;
     }
   }
-  for (let y = write; y >= 0; y--) { board[y][x] = EMPTY; marked[y][x] = false; }
+  for (let y = write; y >= 0; y--) { board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0; }
 }
 
 // ===== タイムライン進行（音楽同期・本家準拠） =====
 // 1列 = 8分音符。マークは「通過するまで」保持され、通過列だけ消去・落下する。
 // スコア/COMBO は 1スイープ単位で確定させる。
 let sweepCleared = 0;
+let sweepBase = 0;      // このスイープの基礎点（豪華コマの単価上昇を含む）
 
 function advanceTimeline() {
   timelineCol++;
@@ -396,14 +641,33 @@ function advanceTimeline() {
   const cleared = [];
   for (let y = 0; y < ROWS; y++) {
     if (marked[y][c] && board[y][c] !== EMPTY) {
-      cleared.push({ y, color: board[y][c] });
+      cleared.push({ y, color: board[y][c], big: bigSize[y][c] });
       board[y][c] = EMPTY;
     }
   }
-  for (let y = 0; y < ROWS; y++) marked[y][c] = false;
+  for (let y = 0; y < ROWS; y++) { marked[y][c] = false; bigSize[y][c] = 0; }
 
   if (cleared.length > 0) {
     sweepCleared += cleared.length;
+
+    // このスイープに適用される倍率（resolveSweep と一致させる）
+    const pendingMult = Math.min(16, Math.pow(2, combo));
+    let colBase = 0;
+    let colBig = 0;
+    for (const cell of cleared) {
+      const bm = cell.big >= BIG_MIN ? 1 + (cell.big - 2) * BIG_BONUS : 1;
+      colBase += 10 * bm;
+      if (cell.big > colBig) colBig = cell.big;
+    }
+    sweepBase += colBase;
+
+    // 加点をその場に飛ばす（爽快感の核）
+    const colPts = Math.round(colBase * pendingMult * levelMult());
+    const mid = cleared[Math.floor(cleared.length / 2)];
+    const cc = cellCenter(c, mid.y);
+    const popScale = 0.85 + Math.min(1.3, combo * 0.22) + (colBig >= BIG_MIN ? 0.5 : 0);
+    Effects.scorePop(cc.cx, cc.cy, "+" + colPts,
+      colBig >= BIG_MIN ? "#ffe27a" : COLORS[mid.color].glow, popScale);
     // 演出: 破片 + グロー粒 + リング + 光柱、音は列位置パン付きベル
     const pan = colPan(c);
     cleared.forEach((cell, i) => {
@@ -429,6 +693,8 @@ function advanceTimeline() {
     }
 
     settleColumn(c);
+    // 列を消すと豪華コマは正方形として崩れる。盤面から取り直して整合を保つ。
+    findBigBlocks();
     updateHud();
   }
 }
@@ -441,21 +707,34 @@ function resolveSweep() {
     squaresCleared += sweepCleared / 4;
 
     const mult = Math.min(16, Math.pow(2, combo - 1)); // x1,x2,x4,x8,x16
-    let pts = sweepCleared * 10 * mult;
+    let pts = Math.round(sweepBase * mult * levelMult());
     if (sweepCleared >= 8) pts += 100;
     score += pts;
 
+    // COMBO はコンボ段数に応じて派手さが増す
     if (combo >= 2) {
-      Effects.popup(canvas.width / 2, 64, "COMBO x" + combo, "#ffe27a");
+      const heat = Math.min(1, (combo - 1) / 5);
+      Effects.popup(canvas.width / 2, 64, "COMBO x" + combo, "#ffe27a", combo >= 4);
+      Effects.screenFlash(0.12 + heat * 0.3);
+      Effects.screenShake(2 + heat * 8);
+      for (let i = 0; i < 1 + Math.min(4, combo); i++)
+        Effects.ring(canvas.width / 2, canvas.height / 2,
+          "#ffe27a", canvas.width * (0.25 + i * 0.16));
       GameAudio.playCombo(combo);
     }
     if (mult >= 4) {
       Effects.popup(canvas.width / 2, canvas.height / 2, "BONUS x" + mult, "#7fffd4", true);
     }
+    // スイープ合計をまとめて中央に打ち出す（達成感）
+    Effects.scorePop(canvas.width / 2, canvas.height / 2 + 46, "+" + pts,
+      combo >= 3 ? "#ffe27a" : "#bfe9ff", 1.1 + Math.min(1.1, combo * 0.2));
+
+    checkLevelUp();
   } else {
     combo = 0;
   }
   sweepCleared = 0;
+  sweepBase = 0;
   updateIntensity();
   updateHud();
 }
@@ -505,7 +784,7 @@ function triggerBurst() {
       if (marked[y][x] && board[y][x] !== EMPTY) cells.push({ x, y, color: board[y][x] });
 
   // 盤面下部の密集を薙ぎ払う（ピンチ脱出）
-  for (let y = ROWS - 1; y >= ROWS - 4; y--) {
+  for (let y = ROWS - 1; y >= ROWS - BURST_ROWS; y--) {
     for (let x = 0; x < COLS; x++) {
       if (board[y][x] !== EMPTY && !cells.find((c) => c.x === x && c.y === y)) {
         cells.push({ x, y, color: board[y][x] });
@@ -519,9 +798,16 @@ function triggerBurst() {
         if (board[y][x] !== EMPTY) cells.push({ x, y, color: board[y][x] });
   }
 
+  // 薙ぎ払う領域を明示（何が起きたのか分かるように）
+  Effects.zone(0, (ROWS - BURST_ROWS) * CELL, COLS * CELL, BURST_ROWS * CELL,
+    "rgba(255,92,240,0.30)");
+
+  let bigBonus = 0;
   cells.forEach((c) => {
+    if (bigSize[c.y][c.x] >= BIG_MIN) bigBonus += (bigSize[c.y][c.x] - 2) * BIG_BONUS * 30;
     board[c.y][c.x] = EMPTY;
     marked[c.y][c.x] = false;
+    bigSize[c.y][c.x] = 0;
     const { cx, cy } = cellCenter(c.x, c.y);
     const col = COLORS[c.color];
     Effects.shatter(cx, cy, col.light, 8, 1.8);
@@ -529,16 +815,21 @@ function triggerBurst() {
     Effects.ring(cx, cy, "#ffffff", CELL * 2);
   });
 
-  score += cells.length * 30;
+  const pts = Math.round((cells.length * 30 + bigBonus) * levelMult());
+  score += pts;
   squaresCleared += cells.length / 4;
 
   Effects.screenFlash(0.9);
-  Effects.screenShake(12);
-  Effects.popup(canvas.width / 2, canvas.height / 2 - 20, "BURST!", "#ff5cf0", true);
+  Effects.screenShake(14);
+  Effects.popup(canvas.width / 2, canvas.height / 2 - 34, "BURST!", "#ff5cf0", true);
+  Effects.popup(canvas.width / 2, canvas.height / 2 + 22,
+    cells.length + " BLOCKS CLEARED", "#ffd2ec");
+  Effects.scorePop(canvas.width / 2, canvas.height / 2 + 64, "+" + pts, "#ff8cf5", 2.0);
   GameAudio.playBurst();
 
   settleColumns();
   markMatches();
+  checkLevelUp();
   updateIntensity();
   updateHud();
 }
@@ -553,6 +844,15 @@ function updateHud() {
   burstFillEl.style.width = (burstGauge / BURST_MAX * 100) + "%";
   burstFillEl.classList.toggle("ready", burstReady);
   burstReadyEl.classList.toggle("hidden", !burstReady);
+
+  // レベル: 現在値・次レベルまでの進捗・得点係数
+  if (levelEl) levelEl.textContent = level;
+  if (levelMultEl) levelMultEl.textContent = "x" + levelMult().toFixed(1);
+  if (levelFillEl) {
+    const need = levelNeed(level);
+    const done = Math.max(0, need - (nextLevelAt - score));
+    levelFillEl.style.width = Math.max(0, Math.min(100, (done / need) * 100)) + "%";
+  }
 }
 
 // ===== ゲームオーバー =====
@@ -562,8 +862,30 @@ function endGame() {
   current = null;
   GameAudio.playGameOver();
   GameAudio.setIntensity(0);
+  Effects.setBurstReady(false);
   Effects.screenShake(8);
-  overScoreEl.textContent = "SCORE: " + score + "  /  MAX COMBO: " + maxCombo;
+
+  // ランキングへ登録し、今回の記録を強調表示する
+  const id = "r" + Date.now() + "-" + Math.random().toString(36).slice(2, 7);
+  const entry = {
+    id, score, level, combo: maxCombo,
+    squares: Math.floor(squaresCleared), big: bestBig,
+    date: new Date().toISOString().slice(0, 10),
+  };
+  const list = saveRanking(entry);
+  const rank = list.findIndex((e) => e.id === id);
+  renderRanking(overRankEl, list, id);
+  renderRanking(startRankEl, list, null);
+
+  overScoreEl.textContent =
+    `SCORE ${score.toLocaleString()}  /  LV ${level}  /  MAX COMBO ${maxCombo}` +
+    (bestBig >= BIG_MIN ? `  /  BEST ${bestBig}×${bestBig}` : "");
+  if (overRankNoteEl) {
+    overRankNoteEl.textContent = rank >= 0
+      ? `${rank + 1} 位にランクイン`
+      : `ランク外（${RANK_MAX}位 ${(list[list.length - 1] || {}).score || 0} 点）`;
+    overRankNoteEl.classList.toggle("is-in", rank >= 0);
+  }
   overOverlay.classList.remove("hidden");
 }
 
@@ -606,11 +928,34 @@ function render() {
     for (let y = 1; y < ROWS; y++)
       ctx.fillRect(x * CELL - 1, y * CELL - 1, 2, 2);
 
-  // セル
+  // セル（豪華コマに含まれるものは個別に描かず、大きな1個として描く）
   for (let y = 0; y < ROWS; y++)
     for (let x = 0; x < COLS; x++)
-      if (board[y][x] !== EMPTY)
+      if (board[y][x] !== EMPTY && !bigSize[y][x])
         drawCell(ctx, x, y, board[y][x], CELL, { marked: marked[y][x] });
+
+  // 豪華コマ
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const n = bigTop[y][x];
+      if (!n || board[y][x] === EMPTY) continue;
+      const px = x * CELL, py = y * CELL, sz = n * CELL;
+      ctx.drawImage(bigBlockSprite(board[y][x], n), px, py);
+      // 消去待ちの脈動（大きいほど強く光る）
+      if (marked[y][x]) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 100);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = (0.18 + pulse * 0.3) * (1 + (n - 3) * 0.2);
+        ctx.drawImage(bigBlockSprite(board[y][x], n), px, py);
+        ctx.restore();
+        ctx.strokeStyle = `rgba(255,232,150,${0.5 + pulse * 0.5})`;
+        ctx.lineWidth = 3;
+        roundRectPath(ctx, px + 3, py + 3, sz - 6, sz - 6, sz * 0.1);
+        ctx.stroke();
+      }
+    }
+  }
 
   // 落下ピース（着地予測のゴースト付き）
   if (current) {
@@ -724,7 +1069,7 @@ function loop(now) {
 
     // 重力
     gravityTimer += dt * 1000;
-    const gi = softDrop ? SOFT_DROP_INTERVAL : GRAVITY_INTERVAL;
+    const gi = softDrop ? SOFT_DROP_INTERVAL : gravityInterval();
     if (gravityTimer >= gi) { gravityTimer = 0; if (current) stepDown(); }
 
     // タイムライン（音楽ビートで進行: 1列 = 8分音符）
@@ -784,6 +1129,18 @@ window.LUMINA = {
   get combo() { return combo; },
   get burstReady() { return burstReady; },
   get gameOver() { return gameOver; },
+  get level() { return level; },
+  get bestBig() { return bestBig; },
+  get gravity() { return Math.round(gravityInterval()); },
+  get mult() { return levelMult(); },
+  bigTopList() {
+    const out = [];
+    for (let y = 0; y < ROWS; y++)
+      for (let x = 0; x < COLS; x++) if (bigTop[y][x]) out.push({ x, y, n: bigTop[y][x] });
+    return out;
+  },
+  addScore(v) { score += v; checkLevelUp(); updateHud(); },
+  endNow() { endGame(); },
   setBoard(grid) {
     board = grid.map((row) => row.slice());
     markMatches();
@@ -805,5 +1162,10 @@ board = makeGrid(EMPTY);
 marked = makeGrid(false);
 current = null;
 nextPiece = randomCells();
+level = 1;
+nextLevelAt = levelNeed(1);
+bigSize = makeGrid(0);
+bigTop = makeGrid(0);
 drawNext();
+renderRanking(startRankEl, loadRanking(), null);
 requestAnimationFrame(loop);
