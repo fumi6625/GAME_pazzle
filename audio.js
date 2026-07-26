@@ -1,14 +1,26 @@
 /*
- * GameAudio v4 — Web Audio API のみで合成する「ダーク・メトロポリス・テクノ」
+ * GameAudio v5 — Web Audio API のみで合成する「ピアノで始まるダーク・テクノ」
  *
- *  設計方針（Rez Infinite / LUMINES 系のクールなトランス・テクノを参照）:
- *   - BPM 140 / 64小節 ≒ 110秒 でシームレスにループ（Rez Area 1 実測 141.5BPM に準拠）
- *   - 極端に低域優勢のミックス: 太いキック + 深いサブベース(36-55Hz)が主役、上物は暗く控えめ
- *   - 構成: イントロ → ビルド → ドロップ → ブレイク → ビルド2 → ドロップ2 → (先頭へ)
- *   - 音色: サブベース / アシッド(レゾナンス)ベース / 金属質パーカッション /
- *           暗いミニマル・アルペジオ / 冷たく広いリバーブ / ダブ的ピンポン・ディレイ
+ *  楽曲（BPM 140 / 80小節 ≒ 137秒 でシームレスにループ）:
+ *    0-7   piano  ピアノ独奏で主題を提示（ドラムなし）
+ *    8-15  join   サブベースとキックが合流。ピアノは伴奏へ回る
+ *    16-23 build  アシッド / ハット / アルペジオが積み上がる
+ *    24-39 drop   シンセリードが主題を歌い切る（本編）
+ *    40-47 break  ピアノ独奏に戻る（最も静か）
+ *    48-55 build2 再構築
+ *    56-79 final  最厚。リード + 3度ハモリ + オクターブ + ピアノ重ね
+ *
+ *  主題（8小節のフック / Am - F - C - G）:
+ *   小節 0/2/4/6 で同じリズム型を保ったまま音高だけを階段状に上げ、
+ *   小節6の D6 で頂点、小節7の E で着地する。一度聴けば輪郭を追える形にした。
+ *
+ *  音色:
+ *   - ピアノ: 倍音の加算合成 + 非調和 + ハンマーのノイズ + 減衰につれ閉じる LPF
+ *   - リード: 7声スーパーソー（300Hz以下を削りサブと分離）
+ *   - サブベース(36-55Hz) / アシッド(レゾナンス)ベース / 金属質パーカッション /
+ *     冷たく広いリバーブ / ダブ的ピンポン・ディレイ
  *   - キック連動サイドチェイン(ダッキング)で全体に「呼吸」を作る
- *   - エジプト音階・民族色は不使用。A エオリアン/ドリアン系のクールな響き
+ *   - セクション音量のオートメーションで静と動の落差を大きく取る
  *
  *  インタラクティブ:
  *   - 操作音(回転/移動/ドロップ/着地/消去/コンボ)は必ず次の16分グリッドへクオンタイズ
@@ -25,9 +37,9 @@ const GameAudio = (() => {
   const spb = 60 / BPM;            // 1拍 = 0.4286s
   const STEP = spb / 4;            // 16分 = 0.1071s
   const BAR = spb * 4;             // 1小節 = 1.714s
-  const BARS = 64;
-  const TOTAL_STEPS = BARS * 16;   // 1024ステップ
-  const LOOP_SEC = TOTAL_STEPS * STEP; // ≒109.7秒
+  const BARS = 80;
+  const TOTAL_STEPS = BARS * 16;   // 1280ステップ
+  const LOOP_SEC = TOTAL_STEPS * STEP; // ≒137.1秒
 
   // ===== 状態 =====
   let ctx = null;
@@ -60,14 +72,15 @@ const GameAudio = (() => {
   // ===== 音名ヘルパー (MIDI → Hz) =====
   const nf = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
-  // ===== コード進行（A エオリアン: i - VI - iv - v、2小節ずつの8小節周期） =====
+  // ===== コード進行（A エオリアン: i - VI - III - VII、2小節ずつの8小節周期） =====
+  // Am - F - C - G。メロディが最も映え、盛り上がりを作りやすい定番の進行。
   const CH = {
-    Am: { sub: nf(33), root: nf(45), tones: [nf(57), nf(60), nf(64), nf(71)] }, // A  C  E  B
-    F:  { sub: nf(29), root: nf(41), tones: [nf(53), nf(57), nf(60), nf(64)] }, // F  A  C  E
-    Dm: { sub: nf(26), root: nf(38), tones: [nf(50), nf(53), nf(57), nf(60)] }, // D  F  A  C
-    Em: { sub: nf(28), root: nf(40), tones: [nf(52), nf(55), nf(59), nf(62)] }, // E  G  B  D
+    Am: { sub: nf(33), root: nf(45), tones: [nf(57), nf(60), nf(64), nf(69)] }, // A  C  E  A
+    F:  { sub: nf(29), root: nf(41), tones: [nf(53), nf(57), nf(60), nf(65)] }, // F  A  C  F
+    C:  { sub: nf(36), root: nf(48), tones: [nf(60), nf(64), nf(67), nf(72)] }, // C  E  G  C
+    G:  { sub: nf(31), root: nf(43), tones: [nf(55), nf(59), nf(62), nf(67)] }, // G  B  D  G
   };
-  const PROG = [CH.Am, CH.F, CH.Dm, CH.Em];
+  const PROG = [CH.Am, CH.F, CH.C, CH.G];
   const chordForBar = (bar) => PROG[(bar >> 1) % PROG.length];
 
   // 効果音用スケール（A マイナー・ペンタ + 9th。どのコードにも乗る）
@@ -93,13 +106,22 @@ const GameAudio = (() => {
   // id は section() の戻り値（背景演出用）: 0=イントロ 1=ビルド 2=ドロップ 3=ブレイク 4=ラストドロップ
   // cut = マスターLPFの開き / lvl = セクション全体の音量。
   // 抑揚を出すため、静と動の落差を大きく取る（ブレイクは大きく引き、ドロップで解放）。
+  // 80小節の物語:
+  //   0-7   piano  … ピアノ独奏で主題を提示（ドラムなし）
+  //   8-15  join   … サブベースとキックが合流。ピアノは伴奏へ
+  //   16-23 build  … アシッド/ハット/アルペジオが積み上がる
+  //   24-39 drop   … シンセリードが主題を歌う（本編）
+  //   40-47 break  … ピアノ独奏に戻る（最も静か）
+  //   48-55 build2 … 再構築
+  //   56-79 final  … 最厚。リード + ハモリ + オクターブ + ピアノ重ね
   function sectionOfBar(bar) {
-    if (bar < 8)  return { id: 0, name: "intro",  cut: 1200, lvl: 0.55 };
-    if (bar < 16) return { id: 1, name: "build",  cut: 3200, lvl: 0.78 };
-    if (bar < 32) return { id: 2, name: "drop",   cut: 9500, lvl: 1.00 };
-    if (bar < 40) return { id: 3, name: "break",  cut: 900,  lvl: 0.42 };
-    if (bar < 48) return { id: 1, name: "build2", cut: 3800, lvl: 0.82 };
-    return { id: 4, name: "drop2", cut: 14000, lvl: 1.00 };
+    if (bar < 8)  return { id: 0, name: "piano",  cut: 8000,  lvl: 0.66 };
+    if (bar < 16) return { id: 0, name: "join",   cut: 5000,  lvl: 0.76 };
+    if (bar < 24) return { id: 1, name: "build",  cut: 3600,  lvl: 0.86 };
+    if (bar < 40) return { id: 2, name: "drop",   cut: 10000, lvl: 1.00 };
+    if (bar < 48) return { id: 3, name: "break",  cut: 3000,  lvl: 0.48 };
+    if (bar < 56) return { id: 1, name: "build2", cut: 4200,  lvl: 0.88 };
+    return { id: 4, name: "final", cut: 15000, lvl: 1.00 };
   }
 
   // ================= 初期化 =================
@@ -478,19 +500,60 @@ const GameAudio = (() => {
     sweep(t, dur, true, 0.07);
   }
 
+  // ================= ピアノ =================
+  // 倍音を積み、高次ほど速く減衰させる加算合成。わずかな非調和で弦の張りを出し、
+  // ハンマーのノイズと減衰につれ閉じるLPFで生っぽさを作る。
+  const PIANO_PARTIALS = [[1, 1.0], [2, 0.40], [3, 0.20], [4, 0.10], [5, 0.055], [7, 0.025]];
+  function piano(freq, t, dur, vel = 1, o = {}) {
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(Math.min(11000, freq * 10), t);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(420, freq * 2.4), t + Math.max(0.2, dur * 0.75));
+
+    const g = ctx.createGain();
+    g.gain.value = 0.115 * vel;
+
+    PIANO_PARTIALS.forEach(([n, amp], k) => {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq * n * (1 + 0.0006 * n * n);   // 非調和
+      const og = ctx.createGain();
+      const d = Math.max(0.09, dur / (1 + k * 0.62));          // 高次ほど短い
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(amp, t + 0.005);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      osc.connect(og); og.connect(lp);
+      osc.start(t); osc.stop(t + dur + 0.06);
+    });
+
+    let node = g;
+    if (o.pan !== undefined) { const pn = pan(o.pan); g.connect(pn); node = pn; }
+    lp.connect(g);
+    node.connect(duck);
+    send(node, revIn, o.rev ?? 0.5);
+    if (o.del) send(node, delayIn, o.del);
+    // ハンマーの当たり
+    nz(t, 0.016, 0.028 * vel, duck, { hp: 2400, pan: o.pan });
+  }
+
   // ================= メインメロディ =================
   // A エオリアンの8小節フック。コードは 2小節ずつ Am → F → Dm → Em。
   // 小節6でトップの B5 に到達して山を作り、小節7で E5 に着地する。
   // [16分位置, MIDI, 長さ(16分)]
+  // Am - F - C - G の上に置く8小節のフック。
+  // 小節 0/2/4/6 は同じリズム型（4分+8分+16分の跳ね上がり）を保ちながら音高だけを
+  // 上げていき、小節6の D6 で頂点に達して小節7で E へ着地する。
+  // 「同じ形が階段状に上がる」構造にすることで一度聴けば追える輪郭にした。
+  // [16分位置, MIDI, 長さ(16分)]
   const MELODY = [
-    [[0, 76, 3], [4, 81, 2], [6, 79, 2], [8, 76, 4], [14, 74, 2]],   // 0 Am  主題
-    [[0, 72, 6], [8, 71, 3], [12, 69, 4]],                            // 1 Am  下降
-    [[0, 77, 3], [4, 76, 2], [6, 72, 2], [8, 77, 4], [14, 76, 2]],   // 2 F   主題の応答
-    [[0, 74, 6], [8, 72, 3], [12, 69, 4]],                            // 3 F   下降
-    [[0, 81, 3], [4, 79, 2], [6, 77, 2], [8, 74, 4], [14, 77, 2]],   // 4 Dm  上方へ展開
-    [[0, 76, 6], [8, 74, 3], [12, 72, 4]],                            // 5 Dm
-    [[0, 71, 3], [4, 76, 2], [6, 79, 2], [8, 83, 4], [14, 81, 2]],   // 6 Em  クライマックス
-    [[0, 79, 4], [6, 77, 2], [8, 76, 6]],                             // 7 Em  着地
+    [[0, 76, 4], [4, 81, 3], [7, 79, 2], [9, 76, 4], [14, 74, 2]],  // 0 Am  E A G E D  ← 主題
+    [[0, 72, 6], [8, 74, 2], [10, 76, 6]],                          // 1 Am  C D E
+    [[0, 77, 4], [4, 81, 3], [7, 79, 2], [9, 77, 4], [14, 76, 2]],  // 2 F   F A G F E  ← 同型
+    [[0, 74, 6], [8, 72, 2], [10, 69, 6]],                          // 3 F   D C A
+    [[0, 79, 4], [4, 84, 3], [7, 83, 2], [9, 79, 4], [14, 76, 2]],  // 4 C   G C6 B G E ← 同型・更に上
+    [[0, 76, 6], [8, 79, 2], [10, 83, 6]],                          // 5 C   E G B
+    [[0, 86, 4], [4, 83, 3], [7, 81, 2], [9, 79, 4], [14, 77, 2]],  // 6 G   D6 B A G F ← 頂点
+    [[0, 76, 8], [8, 74, 4], [12, 71, 4]],                          // 7 G   E D B      ← 着地
   ];
   // イントロで断片だけ匂わせる小節（フックの予告）
   const TEASE_BARS = { 5: [0], 6: [0, 3], 7: [0, 2] };
@@ -508,7 +571,7 @@ const GameAudio = (() => {
     hp.type = "highpass"; hp.frequency.value = 300;
 
     const g = ctx.createGain();
-    const amp = 0.075 * vel;
+    const amp = 0.105 * vel;      // 主役として前に出す
     const atk = o.atk ?? 0.012;
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(amp, t + atk);
@@ -542,6 +605,40 @@ const GameAudio = (() => {
     send(node, revIn, o.rev ?? 0.34);
   }
 
+  // ピアノで主題を弾く。mode:
+  //   "solo"  … 右手で主題 + 左手の分散和音（イントロとブレイク）
+  //   "comp"  … 和音の刻みだけ（ビート合流後の伴奏）
+  //   "double"… リードに寄り添って主題を重ねる（フィナーレ）
+  function pianoPart(bar, i, t, mode, chord) {
+    // --- 左手: ルートと5度の分散（8分） ---
+    if (mode === "solo") {
+      if (i === 0)  piano(chord.root, t, spb * 1.6, 0.85, { pan: -0.35, rev: 0.6 });
+      if (i === 6)  piano(chord.tones[2] * 0.5, t, spb * 1.0, 0.5, { pan: -0.3, rev: 0.6 });
+      if (i === 8)  piano(chord.tones[1] * 0.5, t, spb * 1.2, 0.6, { pan: -0.32, rev: 0.6 });
+      if (i === 14) piano(chord.root * 2, t, spb * 0.8, 0.42, { pan: -0.28, rev: 0.6 });
+    } else if (mode === "comp") {
+      // 裏拍で和音を軽く刻む
+      if (i === 2 || i === 10) {
+        chord.tones.slice(0, 3).forEach((f, k) =>
+          piano(f, t, spb * 0.7, 0.34, { pan: -0.22 + k * 0.2, rev: 0.45 }));
+      }
+      if (i === 0) piano(chord.root, t, spb * 1.4, 0.55, { pan: -0.3 });
+    }
+
+    // --- 右手: 主題 ---
+    if (mode === "solo" || mode === "double") {
+      const evs = MELODY[bar % 8];
+      for (const [pos, midi, len] of evs) {
+        if (pos !== i) continue;
+        const dur = len * STEP * (mode === "solo" ? 1.35 : 1.0);
+        const vel = mode === "solo" ? 1 : 0.42;
+        piano(nf(midi), t, dur, vel, { pan: 0.18, rev: mode === "solo" ? 0.62 : 0.4, del: 0.2 });
+        // 独奏時はオクターブ下を薄く足して芯を出す
+        if (mode === "solo") piano(nf(midi - 12), t, dur * 0.8, 0.30, { pan: 0.12, rev: 0.5 });
+      }
+    }
+  }
+
   // 1小節分のメロディを鳴らす。mode でセクションごとの厚みを変える。
   function playMelodyStep(bar, i, t, mode) {
     const evs = MELODY[bar % 8];
@@ -555,23 +652,20 @@ const GameAudio = (() => {
       const dur = len * STEP * 0.96;
       const f = nf(midi);
       switch (mode) {
-        case "tease":   // イントロ: 断片をディレイの霧の中に
-          leadV(f, t, dur, 0.34, { cut: 1900, del: 0.75, rev: 0.6, atk: 0.05, det: 9 });
+        case "tease":   // 予告: 断片をディレイの霧の中に
+          leadV(f, t, dur, 0.30, { cut: 2200, del: 0.75, rev: 0.6, atk: 0.05, det: 9 });
           break;
         case "build":   // 提示: 控えめ・フィルター閉じ気味
-          leadV(f, t, dur, 0.62, { cut: 3000, del: 0.5, rev: 0.42, det: 12 });
+          leadV(f, t, dur, 0.60, { cut: 3400, del: 0.5, rev: 0.42, det: 12 });
           break;
-        case "drop":    // 主役: オクターブ重ね
-          leadV(f, t, dur, 1.0, { cut: 5200, body: true, det: 16 });
-          leadV(f * 2, t, dur, 0.34, { cut: 7000, del: 0.3, rev: 0.3, det: 20 });
-          break;
-        case "break":   // 叙情: 単音・深い残響
-          leadV(f, t, dur * 1.25, 0.78, { cut: 2600, del: 0.8, rev: 0.95, atk: 0.06, det: 10 });
+        case "drop":    // 主役: 芯 + オクターブ重ね（ここが一番の聴かせどころ）
+          leadV(f, t, dur, 1.0, { cut: 6000, body: true, det: 16, rev: 0.26 });
+          leadV(f * 2, t, dur, 0.36, { cut: 8000, del: 0.3, rev: 0.3, det: 20 });
           break;
         case "final":   // 最厚: 3度ハモリ + オクターブ上下
-          leadV(f, t, dur, 1.0, { cut: 6800, body: true, det: 18, pan: -0.16 });
-          leadV(nf(midi + 3), t, dur, 0.5, { cut: 5200, det: 16, pan: 0.3, del: 0.3 });
-          leadV(f * 2, t, dur, 0.42, { cut: 8000, det: 22, rev: 0.28 });
+          leadV(f, t, dur, 1.0, { cut: 7400, body: true, det: 18, pan: -0.16, rev: 0.24 });
+          leadV(nf(midi + 3), t, dur, 0.52, { cut: 5600, det: 16, pan: 0.3, del: 0.3 });
+          leadV(f * 2, t, dur, 0.44, { cut: 8600, det: 22, rev: 0.28 });
           break;
       }
     }
@@ -582,13 +676,13 @@ const GameAudio = (() => {
     const s = sectionOfBar(bar);
     let base = s.cut;
     if (s.name === "build" || s.name === "build2") {
-      const start = s.name === "build" ? 8 : 40;
+      const start = s.name === "build" ? 16 : 48;
       const p = (bar - start) / 8;          // 0..1 でフィルターが開く
-      base = 1400 + p * p * 7000;
+      base = 1500 + p * p * 8000;
     }
     if (s.name === "break") {
-      const p = (bar - 32) / 8;
-      base = 900 + p * 2600;
+      const p = (bar - 40) / 8;
+      base = 2200 + p * 3200;
     }
     baseCutoff = base;
     const target = Math.max(280, Math.min(18000, base * (0.55 + intensity * 0.15)));
@@ -597,15 +691,15 @@ const GameAudio = (() => {
     // --- セクション音量のオートメーション（抑揚の骨格） ---
     let lvl = s.lvl;
     if (s.name === "build" || s.name === "build2") {
-      const start = s.name === "build" ? 8 : 40;
-      lvl = 0.62 + ((bar - start) / 8) * 0.32;     // ビルド中に持ち上げる
+      const start = s.name === "build" ? 16 : 48;
+      lvl = 0.64 + ((bar - start) / 8) * 0.32;     // ビルド中に持ち上げる
     }
     if (s.name === "break") {
-      const p = (bar - 32) / 8;
-      lvl = 0.34 + p * p * 0.42;                    // 底から徐々に戻す
+      const p = (bar - 40) / 8;
+      lvl = 0.40 + p * p * 0.44;                    // 底から徐々に戻す
     }
     // ドロップ直前の1小節は一瞬引いて、落ちた瞬間の解放感を作る
-    if (bar === 15 || bar === 47 || bar === 31) lvl *= 0.72;
+    if (bar === 23 || bar === 55) lvl *= 0.70;
     secGain.gain.setTargetAtTime(lvl, t, 0.30);
   }
 
@@ -616,19 +710,25 @@ const GameAudio = (() => {
     const name = s.name;
     const chord = chordForBar(bar);
     const barInPhrase = bar % 8;
-    const isDrop = name === "drop" || name === "drop2";
+    const isDrop = name === "drop" || name === "final";
     const isBuild = name === "build" || name === "build2";
-    const big = name === "drop2";
+    const big = name === "final";
+    const isPiano = name === "piano";      // ピアノ独奏（ドラムなし）
+    const isJoin = name === "join";        // ベースとキックが合流
 
     if (i === 0) applyTone(t, bar);
 
     // ---------- キック ----------
-    if (name === "intro") {
-      if (i % 4 === 0) kick(t, bar < 2 ? 0.78 : 0.9, { soft: bar < 2, duckDepth: 0.4 });
+    if (isPiano) {
+      // 独奏。ドラムは一切鳴らさない（最後の1小節だけ予告のキック）
+      if (bar === 7 && i === 12) kick(t, 0.7, { soft: true, duckDepth: 0.3 });
+    } else if (isJoin) {
+      // 合流: まず4分の芯だけ。後半で厚みを足す
+      if (i % 4 === 0) kick(t, bar < 12 ? 0.82 : 0.92, { soft: bar < 10, duckDepth: 0.42 });
     } else if (name === "break") {
-      if (i === 0) kick(t, 0.9, { duckDepth: 0.35 });
-      if (bar >= 36 && i === 8) kick(t, 0.85, { duckDepth: 0.4 });
-      if (bar >= 38 && i % 4 === 0) kick(t, 0.9);
+      if (i === 0) kick(t, 0.85, { duckDepth: 0.35 });
+      if (bar >= 44 && i === 8) kick(t, 0.85, { duckDepth: 0.4 });
+      if (bar >= 46 && i % 4 === 0) kick(t, 0.9);
     } else {
       if (i % 4 === 0) kick(t, isDrop ? 1 : 0.95);
       // ドロップ終盤のダブルキック
@@ -639,10 +739,12 @@ const GameAudio = (() => {
     if ((isBuild && bar % 8 >= 2) || isDrop) {
       if (i === 4 || i === 12) clap(t, isDrop ? 1 : 0.8);
     }
-    if (name === "break" && bar >= 38 && i === 12) clap(t, 0.7);
+    if (isJoin && bar >= 12 && (i === 4 || i === 12)) clap(t, 0.6);
+    if (name === "break" && bar >= 46 && i === 12) clap(t, 0.7);
 
     // ---------- ハイハット / 金属パーカッション ----------
-    if (name === "intro" && bar >= 2 && i % 4 === 2) hatC(t, 0.45);
+    if (isJoin && bar >= 10 && i % 4 === 2) hatC(t, 0.45);
+    if (isJoin && bar >= 14 && i % 2 === 0) hatC(t, 0.35);
     if (isBuild) {
       if (i % 2 === 0) hatC(t, 0.7);
       if (i % 8 === 6) hatO(t, 0.6);
@@ -658,20 +760,22 @@ const GameAudio = (() => {
     if (name === "break") {
       if (i % 4 === 2) hatC(t, 0.35);
       if (i === 6) hatO(t, 0.4);
-      if (PERC[i] > 0 && intensity >= 2 && bar >= 34) ride(t, PERC[i] * 0.5);
+      if (PERC[i] > 0 && intensity >= 2 && bar >= 44) ride(t, PERC[i] * 0.5);
     }
 
     // ---------- サブベース（ハーフタイムの土台） ----------
-    if (i === 0) sub(chord.sub, t, spb * (name === "break" ? 3.4 : 2.6), name === "intro" ? 0.85 : 1);
-    if (name !== "break") {
+    if (!isPiano && i === 0) {
+      sub(chord.sub, t, spb * (name === "break" ? 3.4 : 2.6), isJoin ? 0.85 : 1);
+    }
+    if (!isPiano && name !== "break") {
       if (i === 10) sub(chord.sub, t, spb * 1.1, 0.85);
       if ((isDrop || isBuild) && i === 14) sub(chord.sub * (big ? 1.5 : 1), t, spb * 0.7, 0.7);
-    } else if (i === 12) {
+    } else if (!isPiano && i === 12) {
       sub(chord.sub, t, spb * 0.9, 0.7);
     }
 
     // ---------- アシッド・ベース ----------
-    if (isBuild || isDrop || (name === "break" && bar >= 38)) {
+    if (isBuild || isDrop || (name === "break" && bar >= 46)) {
       const pat = (bar >> 1) % 2 === 0 ? ACID_A : ACID_B;
       const n = pat[i];
       if (n) {
@@ -689,51 +793,59 @@ const GameAudio = (() => {
 
     // ---------- パッド（2小節ごと） ----------
     if (i === 0 && bar % 2 === 0) {
-      const amp = name === "break" ? 0.075 : name === "intro" ? 0.05 : isDrop ? 0.045 : 0.04;
+      const amp = name === "break" ? 0.06 : isPiano ? 0.022 : isJoin ? 0.04 : isDrop ? 0.042 : 0.04;
       pad(chord, t, 2, amp);
     }
 
     // ---------- アルペジオ ----------
     const arpFreq = () => chord.tones[ARP[i] % 4] * (ARP_OCT[i] ? 2 : 1);
-    if (name === "intro" && bar >= 4 && i % 4 === 0) arp(arpFreq(), t, 0.5);
-    if (isBuild && (i % 2 === 0 || intensity >= 2)) arp(arpFreq(), t, 0.6);
-    if (isDrop) arp(arpFreq(), t, i % 4 === 0 ? 1 : 0.62);
-    if (big && intensity >= 2 && i % 2 === 1) arp(arpFreq() * 2, t, 0.3);
-    if (name === "break" && i % 4 === 0) arp(arpFreq(), t, 0.45);
+    if (isJoin && bar >= 12 && i % 4 === 0) arp(arpFreq(), t, 0.45);
+    if (isBuild && (i % 2 === 0 || intensity >= 2)) arp(arpFreq(), t, 0.55);
+    // リードを聴かせるため、ドロップ中のアルペジオは一段下げる
+    if (isDrop) arp(arpFreq(), t, i % 4 === 0 ? 0.7 : 0.4);
+    if (big && intensity >= 2 && i % 2 === 1) arp(arpFreq() * 2, t, 0.22);
 
     // ---------- ダブ・スタブ ----------
     if ((isDrop && bar % 2 === 1 && (i === 6 || i === 14)) ||
         (name === "break" && bar % 2 === 0 && i === 6) ||
-        (name === "intro" && bar % 4 === 3 && i === 12)) {
+        (isJoin && bar % 4 === 3 && i === 12)) {
       stab(chord, t, isDrop ? 1 : 0.7);
     }
 
     // ---------- メインメロディ ----------
     // イントロ=断片 / ビルド=提示 / ドロップ=主役 / ブレイク=叙情 / ラスト=最厚
     let mel = null;
-    if (name === "intro" && bar >= 5) mel = "tease";
+    if (isJoin && bar >= 14) mel = "tease";        // ビルド前に主題をちらつかせる
     else if (name === "build") mel = "build";
-    else if (name === "drop") mel = bar >= 24 ? "drop" : "build";
-    else if (name === "break") mel = bar >= 34 ? "break" : null;
+    else if (name === "drop") mel = "drop";        // ここでリードが主題を歌い切る
     else if (name === "build2") mel = "build";
     else if (big) mel = "final";
     if (mel) playMelodyStep(bar, i, t, mel);
 
+    // ---------- ピアノ ----------
+    // 独奏で主題を提示 → 合流後は伴奏 → ブレイクで再び独奏 → 最後はリードに重ねる
+    let pmode = null;
+    if (isPiano) pmode = "solo";
+    else if (isJoin) pmode = "comp";
+    else if (name === "break") pmode = "solo";
+    else if (big && bar >= 64) pmode = "double";
+    if (pmode) pianoPart(bar, i, t, pmode, chord);
+
     // ---------- 展開用 FX / フィル ----------
-    const bigCrash = bar === 0 || bar === 16 || bar === 32 || bar === 48;
-    if (i === 0 && bigCrash) crash(t, bar === 48 ? 1 : 0.85);
+    const bigCrash = bar === 8 || bar === 24 || bar === 40 || bar === 56;
+    if (i === 0 && bigCrash) crash(t, bar === 56 ? 1 : 0.85);
     if (i === 0 && isDrop && barInPhrase === 0 && !bigCrash) crash(t, 0.5);
 
     // ビルド終盤のライザー（2小節）とスネアロール（最終小節）
-    if ((bar === 14 || bar === 46) && i === 0) riser(t, BAR * 2);
-    if (bar === 15 || bar === 47) {
+    if ((bar === 22 || bar === 54) && i === 0) riser(t, BAR * 2);
+    if (bar === 23 || bar === 55) {
       if (i >= 8) snare(t, 0.25 + (i - 8) * 0.075);
       if (i === 8) reverseCymbal(t, BAR * 0.5, 0.13); // 半小節かけてドロップ頭で最大に
     }
 
     // ブレイク突入 / 復帰のスイープ
-    if (bar === 32 && i === 0) sweep(t, BAR * 1.5, false, 0.1);
-    if (bar === 39 && i === 8) sweep(t, BAR * 0.5, true, 0.1);
+    if (bar === 40 && i === 0) sweep(t, BAR * 1.5, false, 0.1);
+    if (bar === 47 && i === 8) sweep(t, BAR * 0.5, true, 0.1);
 
     // 8小節ごとの軽いフィル
     if (isDrop && barInPhrase === 7 && i >= 12) rim(t, 0.5 + (i - 12) * 0.12, ((i % 2) ? 0.6 : -0.6));
