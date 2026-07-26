@@ -1,36 +1,36 @@
 /*
- * GameAudio v6 — Web Audio API のみで合成する「ピアノで始まる3拍子のダーク・テクノ」
+ * GameAudio v7 — Web Audio API のみで合成する「ビッグビート・ファンク」
  *
- *  拍子: 3/4（1小節 = 3拍 = 16分音符12個。拍頭は 0 / 4 / 8）
- *   - ドラムは「3つ打ち」で推進力を作り、クラップを3拍目に置いて三拍子の揺れを出す
- *   - ピアノは三拍子の定石どおり 1拍目にバス、2・3拍目に和音（ズン・チャッ・チャッ）
- *   - 主題は「長-短-短」（付点4分+8分+8分）を共通の型にした
+ *  参考: HIDEKI NAGANUMA - JACK DA FUNK（実測 BPM 113.5 / 252.3秒 /
+ *        裏拍ピーク 0.688 の強いシャッフル / 中高域主体の明るいミックス）。
+ *        原曲は複製せず、同じテンポ・グルーヴ・構成の流れを持つ独自曲として書いた。
  *
- *  楽曲（BPM 140 / 80小節 ≒ 103秒 でシームレスにループ）:
- *    0-7   piano  ピアノ独奏で主題を提示（ドラムなし）
- *    8-15  join   サブベースとキックが合流。ピアノは伴奏へ回る
- *    16-23 build  アシッド / ハット / アルペジオが積み上がる
- *    24-39 drop   シンセリードが主題を歌い切る（本編）
- *    40-47 break  ピアノ独奏に戻る（最も静か）
- *    48-55 build2 再構築
- *    56-79 final  最厚。リード + 3度ハモリ + オクターブ + ピアノ重ね
+ *  拍子/テンポ: 4/4 · BPM 113.5 · 120小節 ≒ 253.7秒でシームレスにループ
+ *  スウィング: 奇数16分を後ろへ 0.62 の比率でずらす。効果音も同じ跳ねに乗せる。
  *
- *  主題（8小節のフック / Am - F - C - G）:
- *   小節 0/2/4/6 で同じ「長-短-短」の型を保ったまま音高だけを階段状に上げ、
- *   小節6の D6 で頂点、小節7の E で着地する。一度聴けば輪郭を追える形にした。
+ *  構成（参考曲の音量推移に切れ目を合わせた）:
+ *    0-7     intro   スクラッチと濾したブレイクで立ち上げ
+ *    8-15    theme   ブレイク全開 + ベース + ホーンで主題提示
+ *    16-39   mainA   本編。リードがリフを歌う
+ *    40-43   brk1    ドラムが抜けてベースとチョップだけ
+ *    44-55   mainB   復帰・変奏
+ *    56-63   bridge  ハーフタイムで一段落とす
+ *    64-79   mainC   本編再現
+ *    80-83   brk2    小ブレイク
+ *    84-103  climax  全部乗せ
+ *    104-119 outro   抜けていく
  *
- *  音色:
- *   - ピアノ: 倍音の加算合成 + 非調和 + ハンマーのノイズ + 減衰につれ閉じる LPF
- *   - リード: 7声スーパーソー（300Hz以下を削りサブと分離）
- *   - サブベース(36-55Hz) / アシッド(レゾナンス)ベース / 金属質パーカッション /
- *     冷たく広いリバーブ / ダブ的ピンポン・ディレイ
- *   - キック連動サイドチェイン(ダッキング)で全体に「呼吸」を作る
- *   - セクション音量のオートメーションで静と動の落差を大きく取る
+ *  主題: Am7 - Am7 - Dm7 - E7 の上に A ブルーススケールのリフ。
+ *   コール(2小節) → レスポンス(1小節) → ターンアラウンド(1小節) を1セットとし、
+ *   後半4小節はそのままオクターブ上げて盛り上げる。
+ *
+ *  音色: ブレイクビーツ（ゴーストスネア入り） / ファンクベース / クラビのカッティング /
+ *        ホーン・スタブ / オルガン / ターンテーブルのスクラッチ / タンバリン /
+ *        ピアノ / スーパーソーのリード
  *
  *  インタラクティブ:
- *   - 操作音(回転/移動/ドロップ/着地/消去/コンボ)は必ず次の16分グリッドへクオンタイズ
- *   - setIntensity(0..3) でドラムの手数・上物・マスターフィルターの開きが変化
- *   - playBurst は ライザー → 次の拍でインパクト + リバースシンバル
+ *   - 操作音（回転/移動/ドロップ/着地/消去/コンボ）は次の16分へクオンタイズ＋スウィング
+ *   - setIntensity(0..3) で手数・上物・マスターフィルターの開きが変化
  *
  *  著作権フリー: 全てオシレーター/ノイズからのリアルタイム合成（外部音源不使用）
  */
@@ -38,14 +38,20 @@ const GameAudio = (() => {
   "use strict";
 
   // ===== テンポ / 尺 =====
-  const BPM = 140;
-  const spb = 60 / BPM;            // 1拍 = 0.4286s
-  const STEP = spb / 4;            // 16分 = 0.1071s
-  const BAR = spb * 3;             // 3拍子: 1小節 = 3拍 = 1.286s
-  const SPB_STEPS = 12;            // 1小節あたりの16分音符の数（3拍 × 4）
-  const BARS = 80;
-  const TOTAL_STEPS = BARS * SPB_STEPS;  // 960ステップ
-  const LOOP_SEC = TOTAL_STEPS * STEP;   // ≒102.9秒
+  const BPM = 113.5;               // 参考曲の実測テンポ
+  const spb = 60 / BPM;            // 1拍 = 0.5286s
+  const STEP = spb / 4;            // 16分 = 0.1322s
+  const BAR = spb * 4;             // 4拍子: 1小節 = 2.115s
+  const SPB_STEPS = 16;            // 1小節あたりの16分音符の数
+  const BARS = 120;
+  const TOTAL_STEPS = BARS * SPB_STEPS;  // 1920ステップ
+  const LOOP_SEC = TOTAL_STEPS * STEP;   // ≒253.7秒（参考曲は252.3秒）
+
+  // ===== スウィング =====
+  // 参考曲の裏拍ピークは 0.688（三連寄り）。跳ねが命のジャンルなので深めに取る。
+  const SWING = 0.62;
+  // 奇数16分を後ろへずらす量（秒）
+  const swingOf = (i) => (i % 2 === 1 ? (SWING - 0.5) * 2 * STEP : 0);
 
   // ===== 状態 =====
   let ctx = null;
@@ -80,57 +86,79 @@ const GameAudio = (() => {
 
   // ===== コード進行（A エオリアン: i - VI - III - VII、2小節ずつの8小節周期） =====
   // Am - F - C - G。メロディが最も映え、盛り上がりを作りやすい定番の進行。
+  // ファンクらしい 7th / 9th 中心のボイシング。1小節ごとに動く4小節循環。
   const CH = {
-    Am: { sub: nf(33), root: nf(45), tones: [nf(57), nf(60), nf(64), nf(69)] }, // A  C  E  A
-    F:  { sub: nf(29), root: nf(41), tones: [nf(53), nf(57), nf(60), nf(65)] }, // F  A  C  F
-    C:  { sub: nf(36), root: nf(48), tones: [nf(60), nf(64), nf(67), nf(72)] }, // C  E  G  C
-    G:  { sub: nf(31), root: nf(43), tones: [nf(55), nf(59), nf(62), nf(67)] }, // G  B  D  G
+    Am7: { sub: nf(33), root: nf(45), tones: [nf(57), nf(60), nf(64), nf(67)] }, // A  C  E  G
+    Dm7: { sub: nf(26), root: nf(38), tones: [nf(50), nf(53), nf(57), nf(60)] }, // D  F  A  C
+    E7:  { sub: nf(28), root: nf(40), tones: [nf(52), nf(56), nf(59), nf(62)] }, // E  G# B  D
+    F9:  { sub: nf(29), root: nf(41), tones: [nf(53), nf(57), nf(60), nf(67)] }, // F  A  C  G
   };
-  const PROG = [CH.Am, CH.F, CH.C, CH.G];
-  const chordForBar = (bar) => PROG[(bar >> 1) % PROG.length];
+  const PROG = [CH.Am7, CH.Am7, CH.Dm7, CH.E7];
+  const chordForBar = (bar) => PROG[bar % PROG.length];
 
   // 効果音用スケール（A マイナー・ペンタ + 9th。どのコードにも乗る）
   const SCALE = [57, 60, 62, 64, 67, 69, 72, 74, 76, 79, 81, 84].map(nf);
 
   // ===== アシッド・ベース パターン（[半音オフセット, アクセント, スライド]） =====
   const _ = null;
-  // すべて 12 ステップ（3拍 × 16分）。拍頭は 0 / 4 / 8。
-  const ACID_A = [
-    [0, 1, 0], _, [0, 0, 0], [12, 0, 0],
-    [0, 1, 0], _, [10, 0, 0], _,
-    [12, 0, 0], _, [7, 0, 0], [10, 0, 1],
+  // ===== ブレイクビーツ（16ステップ / 拍頭は 0 4 8 12） =====
+  // ファンキー・ドラマー系: キックは1と2裏・3の裏、スネアは2と4、
+  // 隙間にゴーストスネアを置いて跳ねを作る。
+  const KICK_A  = [1, 0, 0, 0, 0, 0, .85, 0, 0, 0, .9, 0, 0, 0, 0, .6];
+  const KICK_B  = [1, 0, 0, .7, 0, 0, .85, 0, 0, .6, .9, 0, 0, 0, .7, 0];
+  const SNARE_A = [0, 0, 0, .25, 1, 0, 0, .3, 0, .22, 0, 0, 1, 0, .3, 0];
+  const SNARE_B = [0, .2, 0, 0, 1, 0, .3, 0, 0, 0, .25, .35, 1, 0, 0, .45];
+  // ハイハット（16分。裏を強めにしてシャッフル感を出す）
+  const HAT     = [.9, .35, .55, .4, .8, .35, .6, .45, .9, .35, .55, .4, .8, .4, .65, .5];
+  // タンバリン / シェイカー
+  const TAMB    = [0, .5, 0, .6, 0, .5, 0, .7, 0, .5, 0, .6, 0, .5, 0, .8];
+
+  // ファンク・ベース（[半音オフセット, アクセント, スライド]）
+  const BASS_A = [
+    [0, 1, 0], _, _, [0, 0, 0], _, _, [12, 0, 0], _,
+    [0, 1, 0], _, [10, 0, 0], _, [12, 0, 0], _, [7, 0, 1], _,
   ];
-  const ACID_B = [
-    [0, 1, 0], [0, 0, 0], _, [12, 0, 1],
-    [10, 0, 0], _, [0, 1, 0], _,
-    [3, 0, 0], [12, 0, 0], _, [7, 0, 0],
+  const BASS_B = [
+    [0, 1, 0], _, [0, 0, 0], _, [3, 0, 0], _, [5, 0, 0], _,
+    [7, 1, 0], _, _, [5, 0, 0], [3, 0, 0], _, [0, 0, 1], _,
   ];
-  // 暗いミニマル・アルペジオ（コードトーンのインデックス / +1 で1oct上）
-  const ARP = [0, 2, 1, 3, 2, 0, 3, 1, 1, 3, 0, 2];
-  const ARP_OCT = [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1];
-  // 金属パーカッションの16分ベロシティ
-  const PERC = [0, 0.5, 0, 0.8, 0, 0.4, 0.9, 0, 0, 0.6, 0, 0.5];
+  // クラビ／カッティングの刻み位置
+  const CLAV   = [0, .8, 0, .9, 0, .7, .5, 0, 0, .85, 0, .9, 0, .7, .6, 0];
+  // ホーン・スタブ（1で短打、2で長め）
+  const HORN_A = [2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0];
+  const HORN_B = [0, 0, 2, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 0, 0, 0];
+  // アルペジオ（旧来の互換用に残す）
+  const ARP = [0, 2, 1, 3, 2, 0, 3, 1, 1, 3, 0, 2, 3, 1, 2, 0];
+  const ARP_OCT = [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1];
+  const PERC = [0, .5, 0, .8, 0, .4, .9, 0, 0, .6, 0, .5, .7, 0, .4, .8];
 
   // ===== セクション =====
   // id は section() の戻り値（背景演出用）: 0=イントロ 1=ビルド 2=ドロップ 3=ブレイク 4=ラストドロップ
   // cut = マスターLPFの開き / lvl = セクション全体の音量。
   // 抑揚を出すため、静と動の落差を大きく取る（ブレイクは大きく引き、ドロップで解放）。
-  // 80小節の物語:
-  //   0-7   piano  … ピアノ独奏で主題を提示（ドラムなし）
-  //   8-15  join   … サブベースとキックが合流。ピアノは伴奏へ
-  //   16-23 build  … アシッド/ハット/アルペジオが積み上がる
-  //   24-39 drop   … シンセリードが主題を歌う（本編）
-  //   40-47 break  … ピアノ独奏に戻る（最も静か）
-  //   48-55 build2 … 再構築
-  //   56-79 final  … 最厚。リード + ハモリ + オクターブ + ピアノ重ね
+  // 120小節 ≒ 254秒。参考曲の音量推移（16s立ち上がり / 88s・120s・168s で落ち /
+  // 178s から全開 / 224s から減衰）にセクションの切れ目を合わせた。
+  //   0-7    intro   スクラッチと濾したブレイクで立ち上げ
+  //   8-15   theme   ブレイク全開 + ベース + ホーンで主題提示
+  //   16-39  mainA   本編。リードが riff を歌う
+  //   40-43  brk1    ドラムが抜けてベースとチョップだけ
+  //   44-55  mainB   復帰・変奏
+  //   56-63  bridge  ハーフタイムで一段落とす
+  //   64-79  mainC   本編再現
+  //   80-83  brk2    小ブレイク
+  //   84-103 climax  全部乗せ
+  //   104-119 outro  抜けていく
   function sectionOfBar(bar) {
-    if (bar < 8)  return { id: 0, name: "piano",  cut: 8000,  lvl: 0.66 };
-    if (bar < 16) return { id: 0, name: "join",   cut: 5000,  lvl: 0.76 };
-    if (bar < 24) return { id: 1, name: "build",  cut: 3600,  lvl: 0.86 };
-    if (bar < 40) return { id: 2, name: "drop",   cut: 10000, lvl: 1.00 };
-    if (bar < 48) return { id: 3, name: "break",  cut: 3000,  lvl: 0.48 };
-    if (bar < 56) return { id: 1, name: "build2", cut: 4200,  lvl: 0.88 };
-    return { id: 4, name: "final", cut: 15000, lvl: 1.00 };
+    if (bar < 8)   return { id: 0, name: "intro",  cut: 1600,  lvl: 0.52 };
+    if (bar < 16)  return { id: 1, name: "theme",  cut: 7000,  lvl: 0.84 };
+    if (bar < 40)  return { id: 2, name: "mainA",  cut: 13000, lvl: 1.00 };
+    if (bar < 44)  return { id: 3, name: "brk1",   cut: 2600,  lvl: 0.56 };
+    if (bar < 56)  return { id: 2, name: "mainB",  cut: 13000, lvl: 1.00 };
+    if (bar < 64)  return { id: 3, name: "bridge", cut: 4200,  lvl: 0.72 };
+    if (bar < 80)  return { id: 2, name: "mainC",  cut: 14000, lvl: 1.00 };
+    if (bar < 84)  return { id: 3, name: "brk2",   cut: 2800,  lvl: 0.58 };
+    if (bar < 104) return { id: 4, name: "climax", cut: 16000, lvl: 1.00 };
+    return { id: 0, name: "outro", cut: 5000, lvl: 0.70 };
   }
 
   // ================= 初期化 =================
@@ -509,6 +537,147 @@ const GameAudio = (() => {
     sweep(t, dur, true, 0.07);
   }
 
+  // ================= ファンクの楽器たち =================
+
+  // ホーン・セクション（ブラス・スタブ）。鋸波を重ねて帯域を絞り、
+  // 立ち上がりに軽いピッチのしゃくりを付けて生管っぽさを出す。
+  function hornStab(chord, t, dur, vel = 1, o = {}) {
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = 1250; bp.Q.value = 0.8;
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.Q.value = 2;
+    lp.frequency.setValueAtTime(2200, t);
+    lp.frequency.linearRampToValueAtTime(4200, t + 0.05);
+    lp.frequency.exponentialRampToValueAtTime(1400, t + dur);
+
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.085 * vel, t + 0.022);
+    g.gain.setValueAtTime(0.085 * vel, t + dur * 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+    const notes = o.notes || chord.tones.slice(1);
+    notes.forEach((f, k) => {
+      [-7, 7].forEach((cents) => {
+        const osc = ctx.createOscillator();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(f * 0.985, t);          // しゃくり
+        osc.frequency.linearRampToValueAtTime(f, t + 0.035);
+        osc.detune.value = cents + (k - 1) * 3;
+        const og = ctx.createGain(); og.gain.value = 0.2;
+        osc.connect(og); og.connect(bp);
+        osc.start(t); osc.stop(t + dur + 0.05);
+      });
+    });
+    bp.connect(lp); lp.connect(g);
+    let node = g;
+    if (o.pan !== undefined) { const pn = pan(o.pan); g.connect(pn); node = pn; }
+    node.connect(duck);
+    send(node, revIn, o.rev ?? 0.28); send(node, delayIn, o.del ?? 0.12);
+  }
+
+  // クラビネット風のカッティング（極短い減衰 + 強いレゾナンス）
+  function clav(freq, t, vel = 1, o = {}) {
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.Q.value = 9;
+    lp.frequency.setValueAtTime(2600 + vel * 2600, t);
+    lp.frequency.exponentialRampToValueAtTime(600, t + 0.11);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.075 * vel, t + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+    ["square", "sawtooth"].forEach((ty, k) => {
+      const osc = ctx.createOscillator();
+      osc.type = ty; osc.frequency.value = freq * (k ? 1.004 : 1);
+      const og = ctx.createGain(); og.gain.value = k ? 0.35 : 0.6;
+      osc.connect(og); og.connect(lp);
+      osc.start(t); osc.stop(t + 0.16);
+    });
+    lp.connect(g);
+    const pn = pan(o.pan ?? 0.3); g.connect(pn); pn.connect(duck);
+    send(pn, delayIn, 0.16);
+  }
+
+  // ターンテーブルのスクラッチ。帯域ノイズの再生速度を往復させて擦る音を作る。
+  function scratch(t, dur = 0.28, vel = 1, o = {}) {
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    // 前後に擦る動き
+    src.playbackRate.setValueAtTime(1.6, t);
+    src.playbackRate.linearRampToValueAtTime(0.35, t + dur * 0.42);
+    src.playbackRate.linearRampToValueAtTime(1.9, t + dur * 0.78);
+    src.playbackRate.linearRampToValueAtTime(0.7, t + dur);
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass"; bp.Q.value = 3.2;
+    bp.frequency.setValueAtTime(700, t);
+    bp.frequency.linearRampToValueAtTime(2600, t + dur * 0.5);
+    bp.frequency.linearRampToValueAtTime(900, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.10 * vel, t + 0.012);
+    g.gain.setValueAtTime(0.10 * vel, t + dur * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(bp); bp.connect(g);
+    const pn = pan(o.pan ?? -0.35); g.connect(pn); pn.connect(duck);
+    send(pn, delayIn, 0.2); send(pn, revIn, 0.18);
+    src.start(t); src.stop(t + dur + 0.02);
+  }
+
+  // ファンク・ベース（指弾き風。軽い歪みと素早いフィルター減衰）
+  function funkBass(freq, t, dur, o = {}) {
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.Q.value = o.accent ? 7 : 3.5;
+    const peak = (o.accent ? 2400 : 1300) + (o.cut || 0);
+    lp.frequency.setValueAtTime(peak, t);
+    lp.frequency.exponentialRampToValueAtTime(320, t + Math.max(0.12, dur));
+    const g = ctx.createGain();
+    const amp = 0.20 * (o.accent ? 1.25 : 1);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(amp, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    if (o.from) {
+      osc.frequency.setValueAtTime(o.from, t);
+      osc.frequency.exponentialRampToValueAtTime(freq, t + 0.07);
+    } else osc.frequency.value = freq;
+    // 芯を出す矩形の1オクターブ下
+    const sq = ctx.createOscillator();
+    sq.type = "square"; sq.frequency.value = freq / 2;
+    const sg = ctx.createGain(); sg.gain.value = 0.32;
+    osc.connect(lp); sq.connect(sg); sg.connect(lp); lp.connect(g); g.connect(duck);
+    osc.start(t); osc.stop(t + dur + 0.04);
+    sq.start(t); sq.stop(t + dur + 0.04);
+  }
+
+  // オルガン（引き伸ばしたコード。倍音を足して枯れた質感に）
+  function organ(chord, t, dur, amp = 0.04) {
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.frequency.value = 2600;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(amp, t + 0.05);
+    g.gain.setValueAtTime(amp, t + dur - 0.12);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    chord.tones.forEach((f) => {
+      [1, 2, 3].forEach((h, k) => {
+        const osc = ctx.createOscillator();
+        osc.type = "sine"; osc.frequency.value = f * h;
+        const og = ctx.createGain(); og.gain.value = [0.5, 0.25, 0.14][k];
+        osc.connect(og); og.connect(lp);
+        osc.start(t); osc.stop(t + dur + 0.06);
+      });
+    });
+    lp.connect(g); g.connect(duck);
+    send(g, revIn, 0.4);
+  }
+
+  // タンバリン
+  function tamb(t, vel = 1) {
+    metal(t, 0.09, 0.045 * vel, drumBus, { base: 900, bp: 7200, hp: 5000, voices: 5, rev: 0.2 });
+  }
+
   // ================= ピアノ =================
   // 倍音を積み、高次ほど速く減衰させる加算合成。わずかな非調和で弦の張りを出し、
   // ハンマーのノイズと減衰につれ閉じるLPFで生っぽさを作る。
@@ -549,20 +718,27 @@ const GameAudio = (() => {
   // A エオリアンの8小節フック。コードは 2小節ずつ Am → F → Dm → Em。
   // 小節6でトップの B5 に到達して山を作り、小節7で E5 に着地する。
   // [16分位置, MIDI, 長さ(16分)]
-  // Am - F - C - G の上に置く8小節のフック（3拍子）。
-  // 各小節は「長-短-短」= 付点4分 + 8分 + 8分 という三拍子の揺れを共通の型とし、
-  // 小節 0/2/4/6 で同じ型のまま音高だけを階段状に上げ、小節6の D6 で頂点、
-  // 小節7の E で着地する。同じ形が上がっていくので一度聴けば輪郭を追える。
-  // [16分位置(0-11), MIDI, 長さ(16分)]
+  // Am7 - Am7 - Dm7 - E7 の上に置く8小節のファンク・リフ。
+  // A ブルーススケール（A C D D# E G）を軸に、16分の跳ねを効かせた
+  // 「コール(2小節) → レスポンス(1小節) → ターンアラウンド(1小節)」を1セットとし、
+  // 後半4小節はそれをそのままオクターブ上げて盛り上げる。
+  // 短く言い切るリフ型なので、跳ねと一緒に体で覚えられる。
+  // [16分位置(0-15), MIDI, 長さ(16分)]
   const MELODY = [
-    [[0, 76, 6], [6, 81, 3], [9, 79, 3]],   // 0 Am  E───  A  G   ← 主題（長-短-短）
-    [[0, 76, 6], [6, 74, 3], [9, 72, 3]],   // 1 Am  E───  D  C
-    [[0, 77, 6], [6, 81, 3], [9, 79, 3]],   // 2 F   F───  A  G   ← 同型・一段上
-    [[0, 77, 6], [6, 76, 3], [9, 74, 3]],   // 3 F   F───  E  D
-    [[0, 79, 6], [6, 84, 3], [9, 83, 3]],   // 4 C   G───  C6 B   ← 同型・さらに上
-    [[0, 79, 6], [6, 79, 3], [9, 76, 3]],   // 5 C   G───  G  E
-    [[0, 86, 6], [6, 83, 3], [9, 81, 3]],   // 6 G   D6──  B  A   ← 頂点
-    [[0, 79, 6], [6, 77, 3], [9, 76, 3]],   // 7 G   G───  F  E   ← 着地
+    // 1-2小節目: Am7 上のコール（跳ねる16分のリフ）
+    [[0, 69, 3], [3, 72, 2], [6, 74, 2], [7, 75, 1], [8, 76, 4], [13, 74, 2]],
+    [[0, 72, 3], [3, 69, 2], [6, 67, 4], [11, 69, 4]],
+    // 3小節目: Dm7 上のレスポンス（下がって受ける）
+    [[0, 77, 3], [3, 76, 2], [6, 74, 3], [10, 72, 5]],
+    // 4小節目: E7 でターンアラウンド（G# を通って解決へ）
+    [[0, 76, 2], [2, 74, 2], [4, 72, 2], [6, 71, 2], [8, 68, 3], [12, 69, 4]],
+    // 5-6小節目: 同じコールをオクターブ上で（盛り上げ）
+    [[0, 81, 3], [3, 84, 2], [6, 86, 2], [7, 87, 1], [8, 88, 4], [13, 86, 2]],
+    [[0, 84, 3], [3, 81, 2], [6, 79, 4], [11, 81, 4]],
+    // 7小節目: Dm7 上で頂点を保つ
+    [[0, 89, 3], [3, 88, 2], [6, 86, 3], [10, 84, 5]],
+    // 8小節目: E7 から A へ着地
+    [[0, 88, 2], [2, 86, 2], [4, 84, 2], [6, 83, 2], [8, 80, 3], [12, 81, 4]],
   ];
   // イントロで断片だけ匂わせる小節（フックの予告）
   const TEASE_BARS = { 5: [0], 6: [0, 3], 7: [0, 2] };
@@ -685,195 +861,151 @@ const GameAudio = (() => {
   function applyTone(t, bar) {
     const s = sectionOfBar(bar);
     let base = s.cut;
-    if (s.name === "build" || s.name === "build2") {
-      const start = s.name === "build" ? 16 : 48;
-      const p = (bar - start) / 8;          // 0..1 でフィルターが開く
-      base = 1500 + p * p * 8000;
-    }
-    if (s.name === "break") {
-      const p = (bar - 40) / 8;
-      base = 2200 + p * 3200;
-    }
+    // イントロはフィルターが徐々に開き、アウトロは閉じていく
+    if (s.name === "intro") base = 900 + Math.pow(bar / 8, 2) * 7000;
+    if (s.name === "outro") base = 12000 * Math.pow(1 - (bar - 104) / 16, 1.5) + 700;
     baseCutoff = base;
     const target = Math.max(280, Math.min(18000, base * (0.55 + intensity * 0.15)));
     musicLp.frequency.setTargetAtTime(target, t, 0.25);
 
     // --- セクション音量のオートメーション（抑揚の骨格） ---
     let lvl = s.lvl;
-    if (s.name === "build" || s.name === "build2") {
-      const start = s.name === "build" ? 16 : 48;
-      lvl = 0.64 + ((bar - start) / 8) * 0.32;     // ビルド中に持ち上げる
-    }
-    if (s.name === "break") {
-      const p = (bar - 40) / 8;
-      lvl = 0.40 + p * p * 0.44;                    // 底から徐々に戻す
-    }
-    // ドロップ直前の1小節は一瞬引いて、落ちた瞬間の解放感を作る
-    if (bar === 23 || bar === 55) lvl *= 0.70;
+    if (s.name === "intro") lvl = 0.34 + (bar / 8) * 0.46;
+    if (s.name === "outro") lvl = 0.92 * Math.pow(1 - (bar - 104) / 16, 0.8) + 0.06;
+    // 復帰直前の1小節は一瞬引いて、戻った瞬間の解放感を作る
+    if (bar === 43 || bar === 63 || bar === 83) lvl *= 0.72;
     secGain.gain.setTargetAtTime(lvl, t, 0.30);
   }
 
-  function scheduleStep(step, t) {
+  function scheduleStep(step, t0) {
     const bar = (step / SPB_STEPS) | 0;
-    const i = step % SPB_STEPS;             // 小節内16分位置（0..11 / 拍頭は 0,4,8）
+    const i = step % SPB_STEPS;
+    const t = t0 + swingOf(i);              // 奇数16分を後ろへ = 跳ね
     const s = sectionOfBar(bar);
     const name = s.name;
     const chord = chordForBar(bar);
-    const barInPhrase = bar % 8;
-    const isDrop = name === "drop" || name === "final";
-    const isBuild = name === "build" || name === "build2";
-    const big = name === "final";
-    const isPiano = name === "piano";      // ピアノ独奏（ドラムなし）
-    const isJoin = name === "join";        // ベースとキックが合流
+    const phrase = bar % 8;                 // リフの8小節周期
+    const isMain = name === "mainA" || name === "mainB" || name === "mainC";
+    const isBig = name === "climax";
+    const full = isMain || isBig;
+    const isBrk = name === "brk1" || name === "brk2";
+    const alt = (bar >> 1) % 2 === 1;       // 2小節ごとにパターンを入れ替える
 
     if (i === 0) applyTone(t, bar);
 
-    // ---------- キック ----------
-    if (isPiano) {
-      // 独奏。ドラムは一切鳴らさない（最後の1小節だけ予告のキック）
-      if (bar === 7 && i === 12) kick(t, 0.7, { soft: true, duckDepth: 0.3 });
-    } else if (isJoin) {
-      // 合流: まず1拍目だけ。後半で3つ打ちへ
-      if (i === 0) kick(t, bar < 12 ? 0.82 : 0.92, { soft: bar < 10, duckDepth: 0.42 });
-      if (bar >= 12 && i === 8) kick(t, 0.8, { duckDepth: 0.4 });
-    } else if (name === "break") {
-      if (i === 0) kick(t, 0.85, { duckDepth: 0.35 });
-      if (bar >= 44 && i === 8) kick(t, 0.85, { duckDepth: 0.4 });
-      if (bar >= 46 && i % 4 === 0) kick(t, 0.9);
+    // ---------- ブレイクビーツ ----------
+    if (name === "intro") {
+      // 濾したブレイクが徐々に姿を現す
+      if (bar >= 2 && KICK_A[i]) kick(t, KICK_A[i] * 0.6, { soft: true, duckDepth: 0.35 });
+      if (bar >= 4 && (i === 4 || i === 12)) snare(t, 0.45);
+      if (bar >= 6 && i % 2 === 0) hatC(t, 0.3);
+    } else if (isBrk) {
+      // ドラムを抜く。頭のキックと4拍目のスネアだけ残す
+      if (i === 0) kick(t, 0.9, { duckDepth: 0.4 });
+      if (i === 12) snare(t, 0.7);
+      if (i % 4 === 2) hatC(t, 0.25);
+    } else if (name === "bridge") {
+      // ハーフタイム: 手数を半分にして重心を下げる
+      if (i === 0) kick(t, 1);
+      if (i === 8) snare(t, 0.95);
+      if (i % 4 === 0) hatC(t, 0.5);
+      if (i === 6 || i === 14) hatO(t, 0.45);
+    } else if (name === "outro") {
+      const fade = 1 - (bar - 104) / 16;
+      const kp = KICK_A[i];
+      if (kp) kick(t, kp * fade);
+      if (SNARE_A[i] >= 1) snare(t, fade);
+      if (i % 2 === 0) hatC(t, 0.5 * fade);
     } else {
-      // 3拍子の推進力は「3つ打ち」で作る。1拍目を強く、2・3拍目はやや弱く
-      if (i === 0) kick(t, isDrop ? 1 : 0.95);
-      if (i === 4 || i === 8) kick(t, isDrop ? 0.88 : 0.8);
-      // フレーズ終わりのダブルキック
-      if (isDrop && barInPhrase === 7 && i === 10) kick(t, 0.75);
+      const kp = (alt ? KICK_B : KICK_A)[i];
+      const sp = (alt ? SNARE_B : SNARE_A)[i];
+      if (kp) kick(t, kp * (isBig ? 1 : 0.95));
+      if (sp) snare(t, sp * (isBig ? 1 : 0.92));       // 小さい値はゴーストになる
+      if (HAT[i]) hatC(t, HAT[i] * (full ? 0.85 : 0.6));
+      if (i === 6 || i === 14) hatO(t, 0.55);
+      if (isBig && TAMB[i]) tamb(t, TAMB[i]);
+      if (full && (i === 7 || i === 15)) rim(t, 0.45, i === 7 ? -0.5 : 0.5);
+      if (isBig && PERC[i] > 0 && intensity >= 2) ride(t, PERC[i] * 0.5);
     }
 
-    // ---------- クラップ / スネア ----------
-    if ((isBuild && bar % 8 >= 2) || isDrop) {
-      if (i === 8) clap(t, isDrop ? 1 : 0.8);                 // 3拍目
-      if (isDrop && bar % 2 === 1 && i === 4) clap(t, 0.45);  // 2小節に一度は2拍目も
-    }
-    if (isJoin && bar >= 12 && i === 8) clap(t, 0.6);
-    if (name === "break" && bar >= 46 && i === 8) clap(t, 0.7);
+    // ---------- サブベース ----------
+    if (name !== "intro" && i === 0) sub(chord.sub, t, spb * 1.6, isBrk ? 0.8 : 1);
 
-    // ---------- ハイハット / 金属パーカッション ----------
-    if (isJoin && bar >= 10 && i % 4 === 2) hatC(t, 0.45);
-    if (isJoin && bar >= 14 && i % 2 === 0) hatC(t, 0.35);
-
-    if (isBuild) {
-      if (i % 2 === 0) hatC(t, 0.7);
-      if (i % 8 === 6) hatO(t, 0.6);
-      if (intensity >= 2 && i % 4 === 3) hatC(t, 0.3);
-    }
-    if (isDrop) {
-      if (i % 2 === 0) hatC(t, 0.85);
-      if (i === 6 || i === 10) hatO(t, big ? 0.75 : 0.6);
-      if (i % 2 === 1) hatC(t, intensity >= 2 ? 0.4 : 0.22);
-      if (PERC[i] > 0 && (intensity >= 1 || big)) ride(t, PERC[i] * (big ? 1 : 0.8));
-      if (intensity >= 2 && (i === 3 || i === 7)) rim(t, 0.6, i === 3 ? -0.5 : 0.5);
-    }
-    if (name === "break") {
-      if (i % 4 === 2) hatC(t, 0.35);
-      if (i === 6) hatO(t, 0.4);
-      if (PERC[i] > 0 && intensity >= 2 && bar >= 44) ride(t, PERC[i] * 0.5);
-    }
-
-    // ---------- サブベース（ハーフタイムの土台） ----------
-    if (!isPiano && i === 0) {
-      sub(chord.sub, t, spb * (name === "break" ? 2.6 : 2.0), isJoin ? 0.85 : 1);
-    }
-    if (!isPiano && name !== "break") {
-      if (i === 8) sub(chord.sub, t, spb * 1.0, 0.85);
-      if ((isDrop || isBuild) && i === 6) sub(chord.sub * (big ? 1.5 : 1), t, spb * 0.5, 0.6);
-    } else if (!isPiano && i === 8) {
-      sub(chord.sub, t, spb * 0.9, 0.7);
-    }
-
-    // ---------- アシッド・ベース ----------
-    if (isBuild || isDrop || (name === "break" && bar >= 46)) {
-      const pat = (bar >> 1) % 2 === 0 ? ACID_A : ACID_B;
+    // ---------- ファンク・ベース ----------
+    if (name !== "intro" || bar >= 4) {
+      const pat = alt ? BASS_B : BASS_A;
       const n = pat[i];
-      if (n) {
+      if (n && (full || isBrk || name === "theme" || name === "bridge" || name === "outro")) {
         const [semi, accent, slide] = n;
         const f = chord.root * Math.pow(2, semi / 12);
-        const cut = isDrop ? (big ? 2200 : 1700) : 900;
-        acid(f, t, STEP * (slide ? 1.9 : 0.95), {
-          accent, cut,
-          from: slide ? f * 0.75 : 0,
-          gain: isDrop ? 0.18 : 0.13,
-          del: isDrop ? 0.14 : 0,
+        funkBass(f, t, STEP * (slide ? 2.4 : 1.5), {
+          accent, from: slide ? f * 0.78 : 0,
+          cut: isBig ? 900 : full ? 500 : 0,
         });
       }
     }
 
-    // ---------- パッド（2小節ごと） ----------
-    if (i === 0 && bar % 2 === 0) {
-      const amp = name === "break" ? 0.06 : isPiano ? 0.022 : isJoin ? 0.04 : isDrop ? 0.042 : 0.04;
-      pad(chord, t, 2, amp);
+    // ---------- クラビのカッティング ----------
+    if ((full || name === "theme") && CLAV[i]) {
+      const idx = (i + bar) % 4;
+      clav(chord.tones[idx] * 2, t, CLAV[i] * (isBig ? 1 : 0.8), { pan: 0.34 });
+    }
+    if (name === "bridge" && i % 4 === 2) clav(chord.tones[1] * 2, t, 0.5, { pan: 0.3 });
+
+    // ---------- ホーン・スタブ ----------
+    if (full || name === "theme") {
+      const hp = (alt ? HORN_B : HORN_A)[i];
+      if (hp) hornStab(chord, t, hp === 2 ? spb * 0.85 : spb * 0.34,
+                       isBig ? 1 : 0.8, { pan: -0.2 });
+    }
+    if (isBrk && i === 0) hornStab(chord, t, spb * 1.4, 0.7, { pan: -0.15, rev: 0.5 });
+
+    // ---------- オルガン ----------
+    if (i === 0 && (name === "bridge" || isBrk)) organ(chord, t, BAR * 0.95, 0.05);
+    if (i === 0 && isBig && bar % 2 === 0) organ(chord, t, BAR * 1.9, 0.028);
+
+    // ---------- パッド（薄い下地） ----------
+    if (i === 0 && bar % 2 === 0 && (name === "intro" || name === "outro")) {
+      pad(chord, t, 2, 0.035);
     }
 
-    // ---------- アルペジオ ----------
-    const arpFreq = () => chord.tones[ARP[i] % 4] * (ARP_OCT[i] ? 2 : 1);
-    if (isJoin && bar >= 12 && i % 4 === 0) arp(arpFreq(), t, 0.45);
-    if (isBuild && (i % 2 === 0 || intensity >= 2)) arp(arpFreq(), t, 0.55);
-    // リードを聴かせるため、ドロップ中のアルペジオは一段下げる
-    if (isDrop) arp(arpFreq(), t, i % 4 === 0 ? 0.7 : 0.4);
-    if (big && intensity >= 2 && i % 2 === 1) arp(arpFreq() * 2, t, 0.22);
+    // ---------- スクラッチ（このジャンルの看板） ----------
+    if (name === "intro" && (bar % 2 === 1) && i === 12) scratch(t, 0.34, 0.9);
+    if (full && phrase === 7 && (i === 8 || i === 12)) scratch(t, 0.26, 1, { pan: i === 8 ? -0.4 : 0.4 });
+    if (isBig && phrase % 4 === 3 && i === 14) scratch(t, 0.2, 0.85, { pan: 0.45 });
+    if (isBrk && i === 6) scratch(t, 0.4, 1, { pan: -0.3 });
 
-    // ---------- ダブ・スタブ ----------
-    if ((isDrop && bar % 2 === 1 && (i === 6 || i === 10)) ||
-        (name === "break" && bar % 2 === 0 && i === 6) ||
-        (isJoin && bar % 4 === 3 && i === 10)) {
-      stab(chord, t, isDrop ? 1 : 0.7);
-    }
-
-    // ---------- メインメロディ ----------
-    // イントロ=断片 / ビルド=提示 / ドロップ=主役 / ブレイク=叙情 / ラスト=最厚
+    // ---------- リフ（リード） ----------
     let mel = null;
-    if (isJoin && bar >= 14) mel = "tease";        // ビルド前に主題をちらつかせる
-    else if (name === "build") mel = "build";
-    else if (name === "drop") mel = "drop";        // ここでリードが主題を歌い切る
-    else if (name === "build2") mel = "build";
-    else if (big) mel = "final";
+    if (name === "theme") mel = "build";
+    else if (isMain) mel = "drop";
+    else if (isBig) mel = "final";
+    else if (isBrk) mel = "tease";
     if (mel) playMelodyStep(bar, i, t, mel);
 
-    // ---------- ピアノ ----------
-    // 独奏で主題を提示 → 合流後は伴奏 → ブレイクで再び独奏 → 最後はリードに重ねる
-    let pmode = null;
-    if (isPiano) pmode = "solo";
-    else if (isJoin) pmode = "comp";
-    else if (name === "break") pmode = "solo";
-    else if (big && bar >= 64) pmode = "double";
-    if (pmode) pianoPart(bar, i, t, pmode, chord);
+    // ---------- ピアノ（イントロとブレイクの彩り） ----------
+    if (name === "intro" && bar >= 4) pianoPart(bar, i, t, "comp", chord);
+    if (name === "bridge") pianoPart(bar, i, t, "comp", chord);
+    if (name === "outro" && bar < 114) pianoPart(bar, i, t, "comp", chord);
 
-    // ---------- 展開用 FX / フィル ----------
-    const bigCrash = bar === 8 || bar === 24 || bar === 40 || bar === 56;
-    if (i === 0 && bigCrash) crash(t, bar === 56 ? 1 : 0.85);
-    if (i === 0 && isDrop && barInPhrase === 0 && !bigCrash) crash(t, 0.5);
-
-    // ビルド終盤のライザー（2小節）とスネアロール（最終小節）
-    if ((bar === 22 || bar === 54) && i === 0) riser(t, BAR * 2);
-    if (bar === 23 || bar === 55) {
-      if (i >= 6) snare(t, 0.25 + (i - 6) * 0.10);
-      if (i === 6) reverseCymbal(t, BAR * 0.5, 0.13); // 半小節かけてドロップ頭で最大に
+    // ---------- 展開 FX ----------
+    if (i === 0 && (bar === 8 || bar === 16 || bar === 44 || bar === 64 || bar === 84)) {
+      crash(t, bar === 84 ? 1 : 0.8);
     }
-
-    // ブレイク突入 / 復帰のスイープ
-    if (bar === 40 && i === 0) sweep(t, BAR * 1.5, false, 0.1);
-    if (bar === 47 && i === 6) sweep(t, BAR * 0.5, true, 0.1);
-
-    // 8小節ごとの軽いフィル
-    if (isDrop && barInPhrase === 7 && i >= 12) rim(t, 0.5 + (i - 12) * 0.12, ((i % 2) ? 0.6 : -0.6));
-
-    // ループ折返し（63小節）— 先頭のクラッシュへ自然に繋げる
-    if (bar === 63) {
-      if (i >= 8) snare(t, 0.2 + (i - 8) * 0.08);
-      if (i === 8) reverseCymbal(t, BAR * 0.5, 0.14);
-      if (i === 12) sweep(t, BAR * 0.25, true, 0.09);
+    // 復帰の直前2小節でライザー
+    if ((bar === 14 || bar === 42 || bar === 62 || bar === 82) && i === 0) riser(t, BAR * 2);
+    // ブレイクへ入る/出る掃引
+    if ((bar === 40 || bar === 56 || bar === 80) && i === 0) sweep(t, BAR, false, 0.09);
+    if ((bar === 43 || bar === 63 || bar === 83) && i === 8) {
+      sweep(t, BAR * 0.5, true, 0.11);
+      reverseCymbal(t, BAR * 0.5, 0.13);
+    }
+    // フレーズ終わりのスネアフィル
+    if ((bar === 15 || bar === 39 || bar === 55 || bar === 103) && i >= 10) {
+      snare(t, 0.3 + (i - 10) * 0.11);
     }
   }
 
-  // ================= スケジューラ =================
   function scheduler() {
     while (nextStepTime < ctx.currentTime + SCHEDULE_AHEAD) {
       scheduleStep(currentStep, nextStepTime);
@@ -901,7 +1033,7 @@ const GameAudio = (() => {
     if (!ctx) return 0;
     if (!started) return ctx.currentTime + 0.001;
     const n = Math.ceil((ctx.currentTime + lead - startTime) / STEP);
-    return startTime + n * STEP;
+    return startTime + n * STEP + swingOf(n % SPB_STEPS);
   }
   function beatGrid(lead = 0.02) {
     if (!ctx || !started) return ctx ? ctx.currentTime + 0.001 : 0;
