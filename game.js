@@ -40,7 +40,9 @@ const MAX_LEVEL = 30;
 
 // ===== 豪華コマ（3x3 以上の同色正方形） =====
 const BIG_MIN = 3;
-const BURST_ROWS = 4;           // BURST が薙ぎ払う最下段からの行数
+const BURST_ROWS = 4;           // BURST-A が薙ぎ払う最下段からの行数
+const SLOW_DURATION = 14;       // BURST-B: タイムラインが遅くなる秒数
+const SLOW_FACTOR = 0.34;       // その間のタイムライン速度
 const BIG_BONUS = 0.6;          // セル単価の倍率 = 1 + (n-2) * BIG_BONUS
 
 // ===== ランキング =====
@@ -55,6 +57,7 @@ let score, squaresCleared, combo, maxCombo;
 let level, nextLevelAt, levelFlash;
 let bestBig;                    // このプレイで作った最大の豪華コマ
 let burstGauge, burstReady;
+let slowTimer = 0;              // BURST-B の残り秒数
 let gameOver, paused, running, softDrop;
 let startTimeMs, elapsedMs;
 let dangerLevel = 0;            // 0..1 盤面の危険度（赤ビネット）
@@ -88,6 +91,8 @@ const levelMultEl = document.getElementById("level-mult");
 const overRankEl = document.getElementById("over-rank");
 const startRankEl = document.getElementById("start-rank");
 const overRankNoteEl = document.getElementById("over-rank-note");
+const levelNextEl = document.getElementById("level-next");
+const slowLeftEl = document.getElementById("slow-left");
 
 // ===== ユーティリティ =====
 function makeGrid(fill) {
@@ -121,10 +126,18 @@ function checkLevelUp() {
     levelFlash = 1;
     Effects.banner("LEVEL " + level, "#7fffd4",
       "SCORE x" + levelMult().toFixed(1) + "  /  SPEED UP");
-    Effects.screenFlash(0.45);
-    Effects.screenShake(6);
-    for (let i = 0; i < 3; i++)
-      Effects.ring(canvas.width / 2, canvas.height / 2, "#7fffd4", canvas.width * (0.4 + i * 0.25));
+    Effects.screenFlash(0.6);
+    Effects.screenShake(9);
+    for (let i = 0; i < 4; i++)
+      Effects.ring(canvas.width / 2, canvas.height / 2, "#7fffd4", canvas.width * (0.35 + i * 0.24));
+    // 背景の世界そのものを切り替える（色相がずれ、飛行速度が上がる）
+    Effects.setLevel(level);
+    Effects.levelUpSurge();
+    if (levelEl) {
+      levelEl.classList.remove("up");
+      void levelEl.offsetWidth;     // アニメーションを再生し直す
+      levelEl.classList.add("up");
+    }
     GameAudio.playLevelUp(level);
     padRumble(0.5, 0.6, 260);
   }
@@ -466,6 +479,7 @@ function init() {
   bestBig = 0;
   burstGauge = 0;
   burstReady = false;
+  slowTimer = 0;
   gameOver = false;
   paused = false;
   softDrop = false;
@@ -479,6 +493,7 @@ function init() {
   nextPiece = randomCells();
   Effects.reset();
   Effects.setBurstReady(false);
+  Effects.setLevel(1);
   GameAudio.setIntensity(1);
   spawnPiece();
   updateHud();
@@ -517,16 +532,19 @@ function move(dx) {
     GameAudio.playMove(dx);
   }
 }
-function rotate() {
+// dir: 1 = 右回転(時計回り) / -1 = 左回転(反時計回り)
+function rotate(dir = 1) {
   if (!current || gameOver || paused) return;
   const c = current.cells;
-  const rotated = [[c[1][0], c[0][0]], [c[1][1], c[0][1]]];
+  const rotated = dir >= 0
+    ? [[c[1][0], c[0][0]], [c[1][1], c[0][1]]]
+    : [[c[0][1], c[1][1]], [c[0][0], c[1][0]]];
   if (!collides(current.x, current.y, rotated)) {
     current.cells = rotated;
-    GameAudio.playRotate();
-    // 回転は「音を回す」動作: ピース中心にリングを出す
+    GameAudio.playRotate(dir);
+    // 回転は「音を回す」動作: ピース中心にリングを出す（方向で色を変える）
     const { cx, cy } = cellCenter(current.x + 0.5, Math.max(0, current.y) + 0.5);
-    Effects.ring(cx, cy, "rgba(150,230,255,1)", CELL * 1.6);
+    Effects.ring(cx, cy, dir >= 0 ? "rgba(150,230,255,1)" : "rgba(255,190,120,1)", CELL * 1.6);
   }
 }
 function hardDrop() {
@@ -771,7 +789,26 @@ function onBurstReady() {
   Effects.banner("BURST READY", "#ff5cf0", "PRESS ENTER / X · L2 · R2");
 }
 
-// ===== BURST 発動 =====
+// ===== BURST-B: タイムライン減速（大きな正方形を組む時間を稼ぐ） =====
+function triggerSlow() {
+  if (!burstReady || gameOver || paused) return;
+  burstReady = false;
+  burstGauge = 0;
+  Effects.setBurstReady(false);
+  slowTimer = SLOW_DURATION;
+
+  Effects.banner("CHRONO", "#7fe9ff",
+    "タイムライン減速 " + SLOW_DURATION + "秒  /  大きな正方形を組め");
+  Effects.screenFlash(0.5);
+  Effects.zone(0, 0, COLS * CELL, ROWS * CELL, "rgba(120,230,255,0.22)");
+  for (let i = 0; i < 4; i++)
+    Effects.ring(canvas.width / 2, canvas.height / 2, "#7fe9ff", canvas.width * (0.3 + i * 0.22));
+  GameAudio.playSlow();
+  padRumble(0.35, 0.8, 500);
+  updateHud();
+}
+
+// ===== BURST-A: 最下段を薙ぎ払う =====
 function triggerBurst() {
   if (!burstReady || gameOver || paused) return;
   burstReady = false;
@@ -843,13 +880,25 @@ function updateHud() {
   burstFillEl.classList.toggle("ready", burstReady);
   burstReadyEl.classList.toggle("hidden", !burstReady);
 
-  // レベル: 現在値・次レベルまでの進捗・得点係数
+  // レベル: 現在値・次レベルまでの進捗・得点係数・残り点
   if (levelEl) levelEl.textContent = level;
   if (levelMultEl) levelMultEl.textContent = "x" + levelMult().toFixed(1);
+  const need = levelNeed(level);
+  const remain = Math.max(0, nextLevelAt - score);
+  const ratio = Math.max(0, Math.min(1, (need - remain) / need));
   if (levelFillEl) {
-    const need = levelNeed(level);
-    const done = Math.max(0, need - (nextLevelAt - score));
-    levelFillEl.style.width = Math.max(0, Math.min(100, (done / need) * 100)) + "%";
+    levelFillEl.style.width = (ratio * 100).toFixed(1) + "%";
+    levelFillEl.classList.toggle("near", ratio >= 0.85 && level < MAX_LEVEL);
+  }
+  if (levelNextEl) {
+    levelNextEl.textContent = level >= MAX_LEVEL
+      ? "MAX"
+      : "NEXT " + remain.toLocaleString();
+  }
+  // CHRONO の残り時間
+  if (slowLeftEl) {
+    slowLeftEl.classList.toggle("hidden", slowTimer <= 0);
+    if (slowTimer > 0) slowLeftEl.textContent = "CHRONO " + slowTimer.toFixed(1) + "s";
   }
 }
 
@@ -1046,6 +1095,13 @@ function drawNext() {
 
 // ===== 背景リサイズ =====
 let boardRect = { x: 0, y: 0, w: 640, h: 400 };
+// 背景キャンバスは縮小されているので、盤面矩形もその座標系へ写す
+function scaledBoardRect() {
+  return {
+    x: boardRect.x * bgScale, y: boardRect.y * bgScale,
+    w: boardRect.w * bgScale, h: boardRect.h * bgScale,
+  };
+}
 function measureBoard() {
   const r = canvas.getBoundingClientRect();
   boardRect = { x: r.left, y: r.top, w: r.width, h: r.height };
@@ -1053,9 +1109,9 @@ function measureBoard() {
 
 // 盤面の裏に暗幕を敷き、その外側へ滑らかに繋ぐ
 function dimBehindBoard(c) {
-  const r = boardRect;
+  const r = scaledBoardRect();
   if (!r.w) return;
-  const pad = 26;
+  const pad = 26 * bgScale;
   c.save();
   const g = c.createLinearGradient(0, r.y - pad, 0, r.y + r.h + pad);
   g.addColorStop(0, "rgba(3,5,12,0)");
@@ -1067,18 +1123,43 @@ function dimBehindBoard(c) {
   c.restore();
 }
 
+// 背景は塗り面積が支配的なので、低解像度で描いて CSS で引き伸ばす。
+// 都市はもともと霞んだ絵なので、解像度を落としても見た目の劣化がほぼない。
+// 画面が大きいほど強く縮小し、実際に塗る画素数を一定の予算内に収める。
+const BG_PIXEL_BUDGET = 0.46e6;
+let bgScale = 0.62;
+
+function bgScaleFor(w, h) {
+  return Math.max(0.42, Math.min(0.72, Math.sqrt(BG_PIXEL_BUDGET / Math.max(1, w * h))));
+}
+
 function resizeBg() {
-  bgCanvas.width = window.innerWidth;
-  bgCanvas.height = window.innerHeight;
+  const sc = bgScaleFor(window.innerWidth, window.innerHeight);
+  bgCanvas.width = Math.max(1, Math.round(window.innerWidth * sc));
+  bgCanvas.height = Math.max(1, Math.round(window.innerHeight * sc));
+  bgScale = bgCanvas.width / window.innerWidth;
   Effects.initBg(bgCanvas.width, bgCanvas.height);
   measureBoard();
 }
 window.addEventListener("resize", resizeBg);
 
 // ===== ループ =====
+let qAcc = 0, qFrames = 0, quality = 1;
+function autoQuality(dt) {
+  qAcc += dt; qFrames++;
+  if (qAcc < 1) return;
+  const fps = qFrames / qAcc;
+  // 30fps を下回りそうなら描画量を落とし、余裕があれば戻す
+  if (fps < 34 && quality > 0.45) quality = Math.max(0.45, quality - 0.14);
+  else if (fps > 52 && quality < 1) quality = Math.min(1, quality + 0.08);
+  Effects.setQuality(quality);
+  qAcc = 0; qFrames = 0;
+}
+
 function loop(now) {
   const dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
+  autoQuality(dt);
 
   pollPad(dt * 1000);
 
@@ -1089,7 +1170,7 @@ function loop(now) {
     running && !gameOver ? 2 : 1);
   // 盤面の背後だけ都市を落とす（コマの可読性を最優先）
   dimBehindBoard(bgCtx);
-  Effects.drawBanners(bgCtx, boardRect);
+  Effects.drawBanners(bgCtx, scaledBoardRect(), bgScale);
 
   if (running && !gameOver && !paused && !padCfgOpen) {
     elapsedMs = now - startTimeMs;
@@ -1101,7 +1182,14 @@ function loop(now) {
 
     // タイムライン（音楽ビートで進行: 1列 = 8分音符）
     const beatsPerCol = 0.5;
-    timelineBeat += dt / GameAudio.secondsPerBeat;
+    if (slowTimer > 0) {
+      slowTimer = Math.max(0, slowTimer - dt);
+      if (slowTimer === 0) {
+        Effects.banner("CHRONO END", "#7fe9ff");
+        GameAudio.playSlowEnd();
+      }
+    }
+    timelineBeat += (dt / GameAudio.secondsPerBeat) * (slowTimer > 0 ? SLOW_FACTOR : 1);
     while (timelineBeat >= beatsPerCol) {
       timelineBeat -= beatsPerCol;
       advanceTimeline();
@@ -1135,26 +1223,30 @@ const PAD_ARR = 55;             // ms: リピート間隔
 //  0:A/×  1:B/○  2:X/□  3:Y/△  4:LB/L1  5:RB/R1  6:LT/L2  7:RT/R2
 //  8:View/Share  9:Menu/Options  12:↑  13:↓  14:←  15:→
 const PAD_MAP_DEFAULT = {
-  rotate:   [0, 3, 4, 5],
-  hardDrop: [1, 12],
-  softDrop: [13],
-  left:     [14],
-  right:    [15],
-  burst:    [2, 6, 7],
-  pause:    [9],
-  restart:  [8],
+  rotateCW:  [0, 5],      // A/× · R1
+  rotateCCW: [3, 4],      // Y/△ · L1
+  hardDrop:  [1, 12],     // B/○ · 十字↑
+  softDrop:  [13],        // 十字↓
+  left:      [14],
+  right:     [15],
+  burst:     [2, 7],      // X/□ · R2 … 薙ぎ払い
+  slow:      [6],         // L2 … 減速
+  pause:     [9],
+  restart:   [8],
 };
 
 // 設定画面に並べる順序と表示名
 const PAD_ACTIONS = [
-  { key: "left",     label: "移動（左）" },
-  { key: "right",    label: "移動（右）" },
-  { key: "rotate",   label: "回転" },
-  { key: "hardDrop", label: "即落下" },
-  { key: "softDrop", label: "ソフトドロップ" },
-  { key: "burst",    label: "BURST" },
-  { key: "pause",    label: "一時停止" },
-  { key: "restart",  label: "リスタート" },
+  { key: "left",      label: "移動（左）" },
+  { key: "right",     label: "移動（右）" },
+  { key: "rotateCW",  label: "右回転" },
+  { key: "rotateCCW", label: "左回転" },
+  { key: "hardDrop",  label: "即落下" },
+  { key: "softDrop",  label: "ソフトドロップ" },
+  { key: "burst",     label: "BURST A（薙ぎ払い）" },
+  { key: "slow",      label: "BURST B（減速）" },
+  { key: "pause",     label: "一時停止" },
+  { key: "restart",   label: "リスタート" },
 ];
 
 // 標準マッピングのボタン名（Xbox / PlayStation 併記）
@@ -1317,9 +1409,11 @@ function pollPad(dtMs) {
     return fired;
   };
 
-  if (edge("rotate")) rotate();
+  if (edge("rotateCW")) rotate(1);
+  if (edge("rotateCCW")) rotate(-1);
   if (edge("hardDrop")) hardDrop();
   if (edge("burst")) triggerBurst();
+  if (edge("slow")) triggerSlow();
   if (edge("pause")) paused = !paused;
   if (edge("restart")) init();
 
@@ -1455,8 +1549,10 @@ document.addEventListener("keydown", (e) => {
     case "ArrowRight": move(1); e.preventDefault(); break;
     case "ArrowUp": hardDrop(); e.preventDefault(); break;      // ↑ = 即座に落下
     case "ArrowDown": softDrop = true; e.preventDefault(); break;
-    case " ": rotate(); e.preventDefault(); break;              // Space = 回転
-    case "Enter": triggerBurst(); e.preventDefault(); break;
+    case " ": rotate(1); e.preventDefault(); break;             // Space = 右回転
+    case "z": case "Z": rotate(-1); e.preventDefault(); break;  // Z = 左回転
+    case "Enter": triggerBurst(); e.preventDefault(); break;    // BURST-A 薙ぎ払い
+    case "Shift": triggerSlow(); e.preventDefault(); break;     // BURST-B 減速
     case "p": case "P": if (!gameOver) paused = !paused; break;
     case "r": case "R": init(); break;
     case "m": case "M": GameAudio.toggleMute(); break;
@@ -1479,6 +1575,7 @@ window.LUMINA = {
   get gameOver() { return gameOver; },
   get level() { return level; },
   get bestBig() { return bestBig; },
+  get slowLeft() { return slowTimer; },
   get gravity() { return Math.round(gravityInterval()); },
   get mult() { return levelMult(); },
   bigTopList() {

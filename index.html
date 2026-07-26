@@ -21,6 +21,23 @@
             <p class="tagline">SYNAESTHETIC BLOCK SEQUENCER</p>
           </header>
 
+          <!-- 盤面の直上: 視線の動きを最小にするため NEXT とレベルをここに置く -->
+          <div class="board-top">
+            <div class="lvbar">
+              <div class="lvbar-head">
+                <span class="stat-label">LEVEL</span>
+                <span id="level" class="level-value">1</span>
+                <span id="level-mult" class="level-mult">x1.0</span>
+                <span id="level-next" class="level-next">NEXT 2,000</span>
+              </div>
+              <div class="level-bar"><div id="level-fill" class="level-fill"></div></div>
+            </div>
+            <div class="next-inline">
+              <span class="stat-label">NEXT</span>
+              <canvas id="next" width="96" height="96"></canvas>
+            </div>
+          </div>
+
           <div class="board-wrap">
             <div class="frame-tick frame-tick-t" aria-hidden="true"></div>
             <canvas id="board" width="640" height="400"></canvas>
@@ -61,8 +78,9 @@
           <footer class="foot">
             同色を <strong>2×2</strong> にそろえ、流れる <strong>タイムライン</strong> で消去。
             <strong>3×3 / 4×4</strong> に広げると <strong>豪華コマ</strong>に変化して単価アップ。
+            <strong>BURST B</strong> でタイムラインを遅くして大きな正方形を狙える。
             連続で <strong>COMBO</strong>、レベルが上がるほど高得点＆高速化。
-            ゲージ満タンで <strong>BURST</strong>（最下段4行を薙ぎ払う）。
+            ゲージ満タンで <strong>BURST A</strong>（最下段4行を薙ぎ払う）。
           </footer>
         </main>
 
@@ -71,15 +89,6 @@
           <div class="stat stat-hero">
             <span class="stat-label">SCORE</span>
             <span id="score" class="stat-value">0</span>
-          </div>
-
-          <div class="level-wrap">
-            <div class="level-head">
-              <span class="stat-label">LEVEL</span>
-              <span id="level" class="level-value">1</span>
-              <span id="level-mult" class="level-mult">x1.0</span>
-            </div>
-            <div class="level-bar"><div id="level-fill" class="level-fill"></div></div>
           </div>
 
           <div class="stat-grid">
@@ -100,12 +109,8 @@
           <div class="burst-wrap">
             <span class="stat-label">BURST</span>
             <div class="burst-bar"><div id="burst-fill" class="burst-fill"></div></div>
-            <span id="burst-ready" class="burst-ready hidden">READY — ENTER</span>
-          </div>
-
-          <div class="stat next-wrap">
-            <span class="stat-label">NEXT</span>
-            <canvas id="next" width="96" height="96"></canvas>
+            <span id="burst-ready" class="burst-ready hidden">READY — A:薙ぎ払い / B:減速</span>
+            <span id="slow-left" class="slow-left hidden">CHRONO 00.0s</span>
           </div>
 
           <div class="stat pad-wrap">
@@ -118,10 +123,12 @@
             <span class="stat-label">CONTROLS</span>
             <ul>
               <li><span class="keys"><kbd>←</kbd><kbd>→</kbd></span><span class="pad" data-pad-hint="move"></span><span class="act">移動</span></li>
-              <li><span class="keys"><kbd>Space</kbd></span><span class="pad" data-pad-hint="rotate"></span><span class="act">回転</span></li>
+              <li><span class="keys"><kbd>Space</kbd></span><span class="pad" data-pad-hint="rotateCW"></span><span class="act">右回転</span></li>
+              <li><span class="keys"><kbd>Z</kbd></span><span class="pad" data-pad-hint="rotateCCW"></span><span class="act">左回転</span></li>
               <li><span class="keys"><kbd>↑</kbd></span><span class="pad" data-pad-hint="hardDrop"></span><span class="act">即落下</span></li>
               <li><span class="keys"><kbd>↓</kbd></span><span class="pad" data-pad-hint="softDrop"></span><span class="act">ソフトドロップ</span></li>
-              <li><span class="keys"><kbd>Enter</kbd></span><span class="pad" data-pad-hint="burst"></span><span class="act">BURST</span></li>
+              <li><span class="keys"><kbd>Enter</kbd></span><span class="pad" data-pad-hint="burst"></span><span class="act">BURST A 薙ぎ払い</span></li>
+              <li><span class="keys"><kbd>Shift</kbd></span><span class="pad" data-pad-hint="slow"></span><span class="act">BURST B 減速</span></li>
               <li><span class="keys"><kbd>P</kbd></span><span class="pad" data-pad-hint="pause"></span><span class="act">一時停止</span></li>
               <li><span class="keys"><kbd>R</kbd></span><span class="pad" data-pad-hint="restart"></span><span class="act">リスタート</span></li>
               <li><span class="keys"><kbd>M</kbd></span><span class="pad">—</span><span class="act">ミュート</span></li>

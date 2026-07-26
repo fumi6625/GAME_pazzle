@@ -422,6 +422,36 @@ const Effects = (() => {
   let prevSecId = -1;
   let secFlash = 0;
   let burstReadyOn = false, burstReadyT = 0;
+  let quality = 1;                 // 実行時に自動調整される描画品質 0.45..1
+  function setQuality(q) { quality = Math.max(0.3, Math.min(1, q)); }
+
+  // ===== レベル連動 =====
+  // レベルが上がるほど都市の色相がずれ、飛行速度が増して「world が変わった」感を出す。
+  let levelNo = 1, levelHue = 0, levelSpeed = 1, levelSurge = 0;
+  function setLevel(n) {
+    levelNo = Math.max(1, n | 0);
+    levelHue = ((levelNo - 1) * 26) % 360;      // 1段ごとに色相を26度ずらす
+    levelSpeed = 1 + Math.min(0.9, (levelNo - 1) * 0.06);
+  }
+  function levelUpSurge() { levelSurge = 1; }
+
+  // RGB を色相回転（レベルごとの世界の変化に使う）
+  function hueRot(c, deg) {
+    if (!deg) return c;
+    const a = deg * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
+    // YIQ 近似の色相回転行列
+    const m = [
+      0.299 + 0.701 * cs + 0.168 * sn, 0.587 - 0.587 * cs + 0.330 * sn, 0.114 - 0.114 * cs - 0.497 * sn,
+      0.299 - 0.299 * cs - 0.328 * sn, 0.587 + 0.413 * cs + 0.035 * sn, 0.114 - 0.114 * cs + 0.292 * sn,
+      0.299 - 0.300 * cs + 1.250 * sn, 0.587 - 0.588 * cs - 1.050 * sn, 0.114 + 0.886 * cs - 0.203 * sn,
+    ];
+    const r = c[0], g = c[1], b = c[2];
+    return [
+      Math.max(0, Math.min(255, m[0] * r + m[1] * g + m[2] * b)),
+      Math.max(0, Math.min(255, m[3] * r + m[4] * g + m[5] * b)),
+      Math.max(0, Math.min(255, m[6] * r + m[7] * g + m[8] * b)),
+    ];
+  }
 
   // ===== ドローン（カメラ） =====
   const FOCAL = 560;          // 焦点距離（小さいほど広角＝ドローンらしい画角）
@@ -687,9 +717,9 @@ const Effects = (() => {
     secFlash = Math.max(0, secFlash - dt * 1.5);
 
     const k = Math.min(1, dt * 0.9);
-    curAccent = mix(curAccent, sec.accent, k);
-    curSub = mix(curSub, sec.sub, k);
-    curSky = mix(curSky, sec.sky, k);
+    curAccent = mix(curAccent, hueRot(sec.accent, levelHue), k);
+    curSub = mix(curSub, hueRot(sec.sub, levelHue), k);
+    curSky = mix(curSky, hueRot(sec.sky, levelHue), k);
     curDens = lerp(curDens, sec.dens * (0.72 + intensity * 0.2), k);
     curCam = lerp(curCam, sec.cam, k);
     curGrid = lerp(curGrid, sec.grid, k);
@@ -697,7 +727,9 @@ const Effects = (() => {
 
     // --- ドローンの機動 ---
     // 前進しながら、周期の異なる正弦を重ねて「手飛ばし」らしい不規則な蛇行にする。
-    camZ += BASE_SPEED * curGrid * (1 + pulse * 0.12) * dt;
+    levelSurge = Math.max(0, levelSurge - dt * 1.1);
+    // レベルアップ直後は一気に加速して「上がった」ことを体感させる
+    camZ += BASE_SPEED * curGrid * levelSpeed * (1 + pulse * 0.12 + levelSurge * 2.4) * dt;
     camXPrev = camX;
     camX = (Math.sin(time * 0.23) * 150 + Math.sin(time * 0.081) * 210) * curCam;
     camY = 215 + Math.sin(time * 0.17) * 70 * curCam + Math.sin(time * 0.41) * 14 * curCam;
@@ -738,14 +770,17 @@ const Effects = (() => {
         B.h = nb.h; B.variant = nb.variant; B.lit = nb.lit; B.spire = nb.spire;
       }
     }
-    const vis = buildings
-      .filter((B) => B.z - camZ > 14 && B.z - camZ < FAR)
+    const far = FAR * (0.55 + 0.45 * quality);
+    let vis = buildings
+      .filter((B) => B.z - camZ > 14 && B.z - camZ < far)
       .sort((a, b) => (b.z - a.z));
+    // 品質を落とすときは遠くの小さい建物から間引く（vis は奥→手前の順）
+    if (quality < 1) vis = vis.slice(Math.floor(vis.length * (1 - quality) * 0.7));
     for (const B of vis) drawBuilding(ctx, B, pulse, dens);
 
     // --- 放射状のスピードライン（前進感を強調） ---
     {
-      const n = Math.round(22 + dens * 26);
+      const n = Math.round((22 + dens * 26) * quality);
       const reach = Math.max(w, h) * 0.62;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
@@ -797,6 +832,24 @@ const Effects = (() => {
       sg.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = sg;
       ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
+
+    // --- レベルアップの衝撃（白熱 → 収束する輪） ---
+    if (levelSurge > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = `rgba(180,255,230,${(levelSurge * 0.28).toFixed(3)})`;
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 3; i++) {
+        const t = Math.max(0, Math.min(1, levelSurge - i * 0.18));
+        if (t <= 0) continue;
+        ctx.strokeStyle = `rgba(127,255,212,${(t * 0.55).toFixed(3)})`;
+        ctx.lineWidth = 1 + t * 5;
+        ctx.beginPath();
+        ctx.arc(halfW, halfH, Math.max(2, (1 - t) * Math.max(w, h) * 0.8), 0, TAU);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -885,7 +938,7 @@ const Effects = (() => {
   }
 
   // rect: 盤面の画面上の矩形 {x, y, w, h}
-  function drawBanners(ctx, rect) {
+  function drawBanners(ctx, rect, scale = 1) {
     if (!banners.length || !rect) return;
     const ls = "letterSpacing" in ctx;
     ctx.save();
@@ -895,11 +948,12 @@ const Effects = (() => {
     banners.forEach((b, i) => {
       const t = 1 - b.age / b.life;
       const pop = 1 - Math.pow(1 - Math.min(1, b.age * 7), 2);
-      // 盤面の上端より上に積む（1段目が一番下）
-      const y = rect.y - 30 - i * 46;
+      // 盤面の下端より下に積む（上側はレベルゲージと NEXT が占めるため）
+      const y = rect.y + rect.h + 34 * scale + i * 46 * scale;
       ctx.save();
       ctx.translate(cx, y);
-      ctx.scale(lerp(1.3, 1, pop), lerp(1.3, 1, pop));
+      const sc = lerp(1.3, 1, pop) * scale;
+      ctx.scale(sc, sc);
       ctx.globalAlpha = Math.min(1, t * 2.4);
       if (ls) ctx.letterSpacing = "10px";
       ctx.font = '200 44px "Helvetica Neue", "Arial Narrow", Arial, system-ui, sans-serif';
@@ -942,6 +996,6 @@ const Effects = (() => {
   return {
     burst, shatter, ring, column, popup, scorePop, zone, screenFlash, screenShake,
     update, drawForeground, drawBackground, getShake, reset, initBg,
-    setBurstReady, banner, drawBanners,
+    setBurstReady, banner, drawBanners, setQuality, setLevel, levelUpSurge,
   };
 })();

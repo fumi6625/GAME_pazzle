@@ -32,7 +32,7 @@ const GameAudio = (() => {
   // ===== 状態 =====
   let ctx = null;
   let master, out, comp, shaper;
-  let musicLp, duck, drumBus, sfxBus;
+  let musicLp, secGain, duck, drumBus, sfxBus;
   let reverb, revIn, revReturn;
   let delayIn, delayReturn;
   let noiseBuf = null;
@@ -91,13 +91,15 @@ const GameAudio = (() => {
 
   // ===== セクション =====
   // id は section() の戻り値（背景演出用）: 0=イントロ 1=ビルド 2=ドロップ 3=ブレイク 4=ラストドロップ
+  // cut = マスターLPFの開き / lvl = セクション全体の音量。
+  // 抑揚を出すため、静と動の落差を大きく取る（ブレイクは大きく引き、ドロップで解放）。
   function sectionOfBar(bar) {
-    if (bar < 8)  return { id: 0, name: "intro",  cut: 1500 };
-    if (bar < 16) return { id: 1, name: "build",  cut: 3200 };
-    if (bar < 32) return { id: 2, name: "drop",   cut: 9000 };
-    if (bar < 40) return { id: 3, name: "break",  cut: 1300 };
-    if (bar < 48) return { id: 1, name: "build2", cut: 3800 };
-    return { id: 4, name: "drop2", cut: 13000 };
+    if (bar < 8)  return { id: 0, name: "intro",  cut: 1200, lvl: 0.55 };
+    if (bar < 16) return { id: 1, name: "build",  cut: 3200, lvl: 0.78 };
+    if (bar < 32) return { id: 2, name: "drop",   cut: 9500, lvl: 1.00 };
+    if (bar < 40) return { id: 3, name: "break",  cut: 900,  lvl: 0.42 };
+    if (bar < 48) return { id: 1, name: "build2", cut: 3800, lvl: 0.82 };
+    return { id: 4, name: "drop2", cut: 14000, lvl: 1.00 };
   }
 
   // ================= 初期化 =================
@@ -184,9 +186,12 @@ const GameAudio = (() => {
     // --- バス構成 ---
     musicLp = ctx.createBiquadFilter();
     musicLp.type = "lowpass"; musicLp.Q.value = 0.7; musicLp.frequency.value = baseCutoff;
-    musicLp.connect(master);
+    // セクションごとの音量オートメーション用（抑揚の骨格）
+    secGain = ctx.createGain(); secGain.gain.value = 0.55;
+    musicLp.connect(secGain); secGain.connect(master);
     duck = ctx.createGain(); duck.gain.value = 1; duck.connect(musicLp); // サイドチェイン対象
-    drumBus = ctx.createGain(); drumBus.gain.value = 1; drumBus.connect(master);
+    // ドラムもセクション音量に追従させる（ブレイクでちゃんと静まるように）
+    drumBus = ctx.createGain(); drumBus.gain.value = 1; drumBus.connect(secGain);
     sfxBus = ctx.createGain(); sfxBus.gain.value = 0.85; sfxBus.connect(master);
   }
 
@@ -586,8 +591,22 @@ const GameAudio = (() => {
       base = 900 + p * 2600;
     }
     baseCutoff = base;
-    const target = Math.max(320, Math.min(18000, base * (0.55 + intensity * 0.15)));
+    const target = Math.max(280, Math.min(18000, base * (0.55 + intensity * 0.15)));
     musicLp.frequency.setTargetAtTime(target, t, 0.25);
+
+    // --- セクション音量のオートメーション（抑揚の骨格） ---
+    let lvl = s.lvl;
+    if (s.name === "build" || s.name === "build2") {
+      const start = s.name === "build" ? 8 : 40;
+      lvl = 0.62 + ((bar - start) / 8) * 0.32;     // ビルド中に持ち上げる
+    }
+    if (s.name === "break") {
+      const p = (bar - 32) / 8;
+      lvl = 0.34 + p * p * 0.42;                    // 底から徐々に戻す
+    }
+    // ドロップ直前の1小節は一瞬引いて、落ちた瞬間の解放感を作る
+    if (bar === 15 || bar === 47 || bar === 31) lvl *= 0.72;
+    secGain.gain.setTargetAtTime(lvl, t, 0.30);
   }
 
   function scheduleStep(step, t) {
@@ -744,6 +763,13 @@ const GameAudio = (() => {
 
   // ================= クオンタイズ =================
   // 次の16分グリッドの絶対時刻を返す（操作音は必ずここに乗せる）
+  // いま鳴っている小節番号（効果音を曲のコードに乗せるのに使う）
+  function barNow() {
+    if (!ctx || !started) return 0;
+    const b = Math.floor((ctx.currentTime - startTime) / BAR) % BARS;
+    return b < 0 ? b + BARS : b;
+  }
+
   function grid(lead = 0.015) {
     if (!ctx) return 0;
     if (!started) return ctx.currentTime + 0.001;
@@ -858,12 +884,34 @@ const GameAudio = (() => {
   }
 
   // 回転: 短い金属ブリップ（上昇FM）
-  function playRotate() {
+  // 回転: 曲の質感（暗いテクノ）に馴染ませる。
+  // 明るい矩形波のピッチアップをやめ、レゾナントに濾したノイズの短い掃引 +
+  // 和音に乗る低めのサブ・ブリップにする。右回転は上向き、左回転は下向き。
+  function playRotate(dir = 1) {
     if (!ctx) return;
     const t = grid();
     if (!slotOK("rot", t, 6)) return;
-    tone(660, t, 0.07, "square", 0.06, sfxBus, { glide: 1320, glideTime: 0.05, lp: 4200 });
-    metal(t, 0.05, 0.045, sfxBus, { base: 520, bp: 5600, hp: 3600, voices: 3 });
+    const up = dir >= 0;
+
+    // レゾナントなフィルタ掃引（テクノの「シュッ」という質感）
+    const src = noiseSrc(t, 0.09);
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass"; bp.Q.value = 9;
+    bp.frequency.setValueAtTime(up ? 900 : 3200, t);
+    bp.frequency.exponentialRampToValueAtTime(up ? 3400 : 800, t + 0.075);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.075, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    src.connect(bp); bp.connect(g);
+    const pn = pan(up ? 0.22 : -0.22);
+    g.connect(pn); pn.connect(sfxBus);
+    send(pn, delayIn, 0.18);
+
+    // 和音に乗る低めのブリップ（キーから外れないよう A エオリアンの構成音）
+    const chord = chordForBar(barNow());
+    const f = chord.tones[up ? 0 : 1] * 0.5;
+    tone(f, t, 0.10, "triangle", 0.05, sfxBus, { lp: 1800, pan: up ? 0.2 : -0.2 });
   }
 
   // 移動: 極小のクリック（方向でパン）
@@ -913,6 +961,47 @@ const GameAudio = (() => {
     [57, 64, 69, 76, 81].slice(0, 2 + depth).forEach((m, k) =>
       bell(nf(m), g0 + k * STEP * 0.34, 1.4, 0.13, sfxBus, { rev: 0.95, del: 0.35 }));
     metal(g0, 0.6, 0.05 * depth, sfxBus, { base: 440, bp: 5200, hp: 2000, voices: 5, rev: 0.8 });
+  }
+
+  // BURST-B 発動: 時間が伸びるような下降スイープ + 深い残響
+  function playSlow() {
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    const g0 = grid();
+    // ピッチが落ちていく = 時間が遅くなる感覚
+    const osc = ctx.createOscillator(); osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(880, g0);
+    osc.frequency.exponentialRampToValueAtTime(110, g0 + 1.4);
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 8;
+    lp.frequency.setValueAtTime(5200, g0);
+    lp.frequency.exponentialRampToValueAtTime(320, g0 + 1.4);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, g0);
+    g.gain.exponentialRampToValueAtTime(0.10, g0 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, g0 + 1.5);
+    osc.connect(lp); lp.connect(g); g.connect(sfxBus);
+    send(g, revIn, 0.9); send(g, delayIn, 0.4);
+    osc.start(g0); osc.stop(g0 + 1.55);
+    // 冷たいベルの余韻
+    [76, 71, 67, 64].forEach((m, k) =>
+      bell(nf(m), g0 + k * STEP * 1.5, 1.6, 0.10, sfxBus, { rev: 1.0, del: 0.4, pan: 0.4 - k * 0.27 }));
+    nz(g0, 1.2, 0.05, sfxBus, { hp: 5000, rev: 0.9 });
+  }
+
+  // BURST-B 終了: 時間が戻る上昇スイープ
+  function playSlowEnd() {
+    if (!ctx) return;
+    const g0 = grid();
+    const osc = ctx.createOscillator(); osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(120, g0);
+    osc.frequency.exponentialRampToValueAtTime(900, g0 + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, g0);
+    g.gain.exponentialRampToValueAtTime(0.06, g0 + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, g0 + 0.55);
+    osc.connect(g); g.connect(sfxBus); send(g, revIn, 0.5);
+    osc.start(g0); osc.stop(g0 + 0.6);
+    bell(nf(81), g0 + 0.42, 0.8, 0.10, sfxBus, { rev: 0.7 });
   }
 
   // BURST ゲージ満タン: 「準備完了」を明確に知らせる上昇フレーズ
@@ -999,6 +1088,7 @@ const GameAudio = (() => {
     // 効果音
     playClear, playLock, playSquare, playCombo, playBurst, playGameOver,
     playRotate, playMove, playDrop, playBurstReady, playLevelUp, playGrand,
+    playSlow, playSlowEnd,
     // ミュート
     toggleMute, isMuted,
     // 参考情報
