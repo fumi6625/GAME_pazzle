@@ -702,7 +702,7 @@ const Effects = (() => {
     time += dt;
 
     const pulse = Math.pow(1 - beat, 3);
-    if (beat < prevBeat) { beatCount++; if (beatCount % 4 === 0) barPulse = 1; }
+    if (beat < prevBeat) { beatCount++; if (beatCount % 3 === 0) barPulse = 1; }  // 3拍子
     prevBeat = beat;
     barPulse = Math.max(0, barPulse - dt * 1.6);
 
