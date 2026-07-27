@@ -1617,6 +1617,16 @@ bigSize = makeGrid(0);
 bigTop = makeGrid(0);
 drawNext();
 renderRanking(startRankEl, loadRanking(), null);
+// 音楽素材の先読み。START を押すまでに間に合わせる。
+if (GameAudio.preload) {
+  GameAudio.preload().then(() => {
+    const hint = document.querySelector("#start .overlay-hint");
+    if (hint && GameAudio.usingFallback) {
+      hint.textContent = "クリック / SPACE / コントローラーのボタン で開始"
+        + "（file:// で開いているためミックス固定。HTTP配信でレイヤー連動が有効になります）";
+    }
+  });
+}
 renderPadCfg();
 renderControlHints();
 {
