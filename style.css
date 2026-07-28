@@ -726,16 +726,20 @@ kbd {
 
 /* ===== タッチ操作 ===== */
 /* 既定は非表示。粗いポインタ（スマホ・タブレット）でのみ出す。 */
-.touchpad { display: none; }
+.touchpad, .toptouch { display: none; }
 .foot-touch { display: none; }
+
+.topbar-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 
 @media (pointer: coarse) {
   .touchpad {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: 1fr 1fr;   /* 常に左右2つ */
     gap: 8px;
-    margin-top: 10px;
+    width: 100%;
   }
+  /* 一時停止・ミュートは画面上端に隔離（誤操作防止） */
+  .toptouch { display: flex; gap: 6px; }
   .foot-touch { display: inline; }
   /* 物理キー/パッドの説明はスマホでは邪魔なので畳む */
   .controls, .pad-wrap { display: none; }
@@ -744,89 +748,68 @@ kbd {
 .tbtn {
   -webkit-appearance: none;
   appearance: none;
-  min-height: 54px;
+  min-height: 52px;
   font-size: 20px;
   font-weight: 300;
   color: var(--text);
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   transition: background 0.08s, transform 0.08s;
 }
-.tbtn:active { background: rgba(92, 228, 255, 0.28); transform: scale(0.95); }
-.tbtn-drop { font-size: 22px; color: var(--accent); }
-.tbtn-a, .tbtn-b {
-  grid-column: span 2;
-  font-size: 12px;
-  letter-spacing: 0.18em;
+.tbtn:active { background: rgba(92, 228, 255, 0.28); transform: scale(0.96); }
+
+/* ドロップは補助（スワイプでも出せる）ので小さめ */
+.tbtn-drop { min-height: 42px; font-size: 20px; color: var(--accent); }
+
+/* BURST は回転と色で明確に分ける */
+.tbtn-a {
+  color: var(--accent-2);
+  border-color: rgba(255, 92, 200, 0.55);
+  background: rgba(255, 92, 200, 0.10);
+  font-size: 13px; letter-spacing: 0.16em;
 }
-.tbtn-a { color: var(--accent-2); border-color: rgba(255, 92, 200, 0.4); }
-.tbtn-b { color: #7fe9ff; border-color: rgba(127, 233, 255, 0.4); }
-.tbtn-sm { font-size: 13px; color: var(--muted); min-height: 40px; }
-
-/* スマホ横持ち: 縦が乏しいのでタイトルと説明を畳み、タッチボタンを盤面の横へ回して
-   盤面に画面の高さをすべて使わせる。盤面は縦横比を保ったまま高さで頭打ちにする。 */
-@media (pointer: coarse) and (orientation: landscape) and (max-height: 560px) {
-  .stage { align-items: center; height: 100dvh; }
-  .game-area {
-    padding: 6px calc(6px + env(safe-area-inset-right)) 6px calc(6px + env(safe-area-inset-left));
-    height: 100dvh;
-  }
-  .layout { flex-direction: row; gap: 8px; align-items: stretch; height: 100%; }
-  .topbar, .foot { display: none; }
-
-  /* 中央カラム: 上にレベル帯、下は「盤面 | タッチボタン」の2列 */
-  .main {
-    width: auto;
-    flex: 1 1 auto;
-    min-width: 0;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: 1fr 132px;
-    grid-template-rows: auto 1fr;
-    gap: 6px 8px;
-  }
-  .board-top { grid-column: 1 / -1; margin-bottom: 0; padding-bottom: 5px; }
-  .board-wrap {
-    grid-column: 1; grid-row: 2;
-    padding: 5px;
-    display: flex; align-items: center; justify-content: center;
-    min-height: 0;
-  }
-  /* canvas は置換要素なので width/height:auto + max-* で縦横比が保たれる。
-     max-height を % にすると親の高さが不定で無視されるため、画面高から直接引く。
-     引く分 = game-area の上下余白 + レベル帯 + board-wrap の余白 + gap ≒ 80px */
-  #board {
-    width: auto; height: auto;
-    max-width: 100%;
-    max-height: calc(100dvh - 80px);
-  }
-
-  .touchpad {
-    grid-column: 2; grid-row: 2;
-    grid-template-columns: repeat(2, 1fr);
-    align-content: center;
-    gap: 5px; margin-top: 0;
-  }
-  .tbtn { min-height: 34px; font-size: 15px; }
-  .tbtn-sm { min-height: 28px; font-size: 11px; }
-  .tbtn-a, .tbtn-b { grid-column: span 2; font-size: 10px; }
-
-  .hud {
-    width: 150px; flex: 0 0 150px;
-    flex-direction: column; gap: 5px;
-    overflow-y: auto; padding-top: 0;
-  }
-  .hud > * { flex: 0 0 auto; }
-  .stat-hero .stat-value { font-size: 20px; }
-  .stat-grid { gap: 8px; }
-  .stat-grid .stat-value { font-size: 13px; }
-  .level-value { font-size: 17px; }
-  .next-inline #next { width: 40px; height: 40px; }
+.tbtn-b {
+  color: #7fe9ff;
+  border-color: rgba(127, 233, 255, 0.55);
+  background: rgba(127, 233, 255, 0.10);
+  font-size: 13px; letter-spacing: 0.16em;
 }
+.tbtn-a:active { background: rgba(255, 92, 200, 0.34); }
+.tbtn-b:active { background: rgba(127, 233, 255, 0.34); }
+
+/* 回転は一番よく使うので最大・画面最下段 */
+.tbtn-rot {
+  min-height: 84px;
+  font-size: 40px;
+  color: #ffe27a;
+  border-color: rgba(255, 226, 122, 0.5);
+  background: rgba(255, 226, 122, 0.09);
+}
+.tbtn-rot:active { background: rgba(255, 226, 122, 0.30); }
+
+.tbtn-sm {
+  min-height: 34px; min-width: 40px;
+  font-size: 13px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* ===== ドラッグ領域 ===== */
+/* 盤面の下に置く親指用のスペース。ここを触っても指がコマにかからない。
+   既定は非表示で、横持ちのタッチ端末でのみ出す。 */
+.dragzone { display: none; }
+.dragzone-hint {
+  font-family: var(--ui);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--dim-2);
+  pointer-events: none;
+}
+
 
 /* ===== レスポンシブ ===== */
 @media (max-width: 1000px) {
@@ -883,7 +866,16 @@ kbd {
 
   /* 説明文は盤面の面積を圧迫するので、スマホでは操作方法だけ残す */
   .foot-rules { display: none; }
-  .foot { margin-top: 6px; font-size: 10px; line-height: 1.4; }
+  .foot { margin-top: 6px; font-size: 10px; line-height: 1.4; order: 99; }
+  /* 並び: 盤面 → スコア → 操作ボタン */
+  .main { order: 1; }
+  .hud { order: 2; }
+  .touchpad { order: 3; }
+  /* NEXT を盤面に密着させ、少し大きくして見やすくする */
+  .board-top { margin-bottom: 3px; padding-bottom: 4px; border-bottom: 0; gap: 12px; }
+  .next-inline { gap: 6px; }
+  .next-inline .stat-label { font-size: 7px; letter-spacing: 0.16em; }
+  .next-inline #next { width: 56px; height: 56px; }
   /* 統計は1行に詰めて、浮いた高さを盤面に回す */
   .hud { gap: 6px 12px; }
   .stat-hero { flex: 0 0 auto; }
@@ -892,11 +884,88 @@ kbd {
   .stat-grid { flex: 1 1 auto; gap: 10px; }
   .stat-grid .stat-value { font-size: 14px; }
   .burst-wrap { gap: 5px; }
-  .touchpad { gap: 6px; margin-top: 8px; }
-  .tbtn { min-height: 46px; font-size: 18px; }
-  .tbtn-sm { min-height: 34px; }
+  .touchpad { gap: 7px; margin-top: 6px; }
+  .tbtn { min-height: 44px; font-size: 18px; }
+  .tbtn-drop { min-height: 40px; }
+  .tbtn-a, .tbtn-b { min-height: 52px; font-size: 12px; }
+  /* 一番よく使う回転は最下段に大きく確保する（.tbtn の指定を上書き） */
+  .tbtn-rot { min-height: 92px; font-size: 42px; }
+  .tbtn-sm { min-height: 32px; font-size: 12px; }
   .overlay-title { font-size: 24px; }
   .cfg-inner { padding: 16px; }
   .rank-panel { width: 100%; }
   .rank-list { max-height: 34vh; }
+}
+
+/* 横持ちの指定は後段のレスポンシブ指定より優先させたいので、ファイル末尾に置く */
+/* スマホ横持ち: 縦が乏しいのでタイトルと説明を畳み、
+   「盤面 | スコア | 操作ボタン」の3列にして盤面に画面の高さを使わせる。
+   操作ボタンは親指が届く右端に置く。 */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 560px) {
+  .stage { align-items: center; height: 100dvh; }
+  .game-area {
+    padding: 6px calc(6px + env(safe-area-inset-right)) 6px calc(6px + env(safe-area-inset-left));
+    height: 100dvh;
+  }
+  .layout { flex-direction: row; gap: 8px; align-items: stretch; height: 100%; }
+  .tagline, .foot { display: none; }
+  /* 見出しは流れから外し、その高さぶんだけ盤面を上に上げる。
+     一時停止/ミュートは画面右上（操作ボタンから最も遠い場所）に固定。 */
+  .topbar {
+    position: fixed;
+    top: calc(2px + env(safe-area-inset-top));
+    right: calc(6px + env(safe-area-inset-right));
+    margin: 0; padding: 0; border: 0;
+    z-index: 30;
+  }
+  .logo { display: none; }
+  .toptouch { gap: 5px; }
+  .tbtn-sm { min-height: 24px; min-width: 34px; font-size: 11px; }
+  .frame-tick { display: none; }
+
+  /* .main は「上に詰める」縦フレックス。余った下側は丸ごとドラッグ領域に渡す。 */
+  .main { order: 1; width: auto; flex: 1 1 auto; min-width: 0; min-height: 0;
+          display: flex; flex-direction: column; justify-content: flex-start; }
+  .hud   { order: 2; width: 128px; flex: 0 0 128px; flex-direction: column;
+           gap: 5px; padding-top: 0; overflow-y: auto; }
+  .touchpad { order: 3; width: 132px; flex: 0 0 132px;
+              align-content: center; gap: 5px; }
+
+  .topbar, .board-top, .board-wrap { flex: 0 0 auto; }
+  .board-wrap { padding: 4px; display: flex; align-items: center; justify-content: center; }
+  /* 盤面は画面上部に寄せ、下側にドラッグ用の余白を必ず残す */
+  #board { width: auto; height: auto; max-width: 100%;
+           max-height: min(calc(100dvh - 148px), 58dvh); }
+  .board-top { margin-bottom: 3px; padding-bottom: 3px; gap: 18px; border-bottom: 0; }
+  .lvbar-head { gap: 6px; }
+  .level-next { font-size: 8px; }
+  .next-inline { gap: 6px; }
+
+  /* 親指ドラッグ領域: 盤面より下の左側スペースを全部使う */
+  .dragzone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1 1 auto;
+    min-height: 62px;
+    margin-top: 6px;
+    border: 1px dashed rgba(92, 228, 255, 0.22);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(92, 228, 255, 0.05), rgba(92, 228, 255, 0.012));
+    touch-action: none;
+  }
+  .dragzone:active { background: rgba(92, 228, 255, 0.12); }
+  .next-inline #next { width: 34px; height: 34px; }
+  .level-value { font-size: 14px; }
+
+  .hud > * { flex: 0 0 auto; }
+  .stat-hero .stat-value { font-size: 19px; }
+  .stat-grid { gap: 6px; }
+  .stat-grid .stat-value { font-size: 12px; }
+
+  .tbtn { min-height: 34px; font-size: 15px; }
+  .tbtn-drop { min-height: 30px; font-size: 16px; }
+  .tbtn-a, .tbtn-b { min-height: 34px; font-size: 9px; letter-spacing: 0.1em; }
+  .tbtn-rot { min-height: 58px; font-size: 28px; }
+  .tbtn-sm { min-height: 26px; font-size: 11px; }
 }

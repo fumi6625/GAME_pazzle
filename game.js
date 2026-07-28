@@ -1565,19 +1565,22 @@ function cellPx() {
   return r.width / COLS;    // 表示上の1セル幅（盤面は縮小表示されることがある）
 }
 
-canvas.addEventListener("pointerdown", (e) => {
+const dragZone = document.getElementById("dragzone");
+// 盤面とドラッグ領域は同じジェスチャを受ける。指がコマを隠さないよう、
+// 実際の操作は盤面下の領域で行えるようにしてある。
+const gestureTargets = [canvas, dragZone].filter(Boolean);
+
+function onGestureDown(e) {
   if (e.pointerType !== "touch") return;
   if (!running || gameOver || padCfgOpen) return;
   if (touchId !== null) { tTwo = true; return; }   // 2本目 = 左回転の合図
   touchId = e.pointerId;
   tx0 = e.clientX; ty0 = e.clientY; tt0 = performance.now();
   tCarry = 0; tMoved = false; tTwo = false;
-  // 指が盤面外へ出ても追従させる。合成イベント等で捕捉できない場合もあるので握り潰す。
-  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 捕捉できなくても動く */ }
   e.preventDefault();
-}, { passive: false });
+}
 
-canvas.addEventListener("pointermove", (e) => {
+function onGestureMove(e) {
   if (e.pointerId !== touchId) return;
   const dx = e.clientX - tx0;
   const dy = e.clientY - ty0;
@@ -1590,7 +1593,7 @@ canvas.addEventListener("pointermove", (e) => {
     tCarry += want * w;
   }
   e.preventDefault();
-}, { passive: false });
+}
 
 function endTouch(e) {
   if (e.pointerId !== touchId) return;
@@ -1610,18 +1613,19 @@ function endTouch(e) {
   touchId = null; tTwo = false;
   e.preventDefault();
 }
-canvas.addEventListener("pointerup", endTouch, { passive: false });
-canvas.addEventListener("pointercancel", (e) => {
-  if (e.pointerId === touchId) { touchId = null; tTwo = false; }
+gestureTargets.forEach((el) => {
+  el.addEventListener("pointerdown", onGestureDown, { passive: false });
+  el.addEventListener("pointermove", onGestureMove, { passive: false });
+  el.addEventListener("pointerup", endTouch, { passive: false });
+  el.addEventListener("pointercancel", (e) => {
+    if (e.pointerId === touchId) { touchId = null; tTwo = false; }
+  });
 });
 
 // ===== 画面下のタッチボタン =====
 {
-  const pad = document.getElementById("touchpad");
   let repeatTimer = null, repeatDelay = null;
   const fire = {
-    left: () => move(-1),
-    right: () => move(1),
     rotateCW: () => rotate(1),
     rotateCCW: () => rotate(-1),
     hardDrop: () => hardDrop(),
@@ -1635,21 +1639,15 @@ canvas.addEventListener("pointercancel", (e) => {
     repeatDelay = repeatTimer = null;
   };
 
-  if (pad) pad.addEventListener("pointerdown", (e) => {
-    const btn = e.target.closest(".tbtn");
+  // ボタンは画面上端(.toptouch)と下部(#touchpad)に分かれているので document で受ける
+  document.addEventListener("pointerdown", (e) => {
+    const btn = e.target.closest && e.target.closest(".tbtn");
     if (!btn) return;
     e.preventDefault();
     const act = btn.getAttribute("data-act");
     if (!running) { startGame(); return; }
     if (act === "softDrop") { touchSoftDrop = true; return; }
     if (fire[act]) fire[act]();
-    // 左右は押しっぱなしでリピート（キーボードの DAS/ARR と同じ間隔）
-    if (act === "left" || act === "right") {
-      stopRepeat();
-      repeatDelay = setTimeout(() => {
-        repeatTimer = setInterval(fire[act], PAD_ARR);
-      }, PAD_DAS);
-    }
   }, { passive: false });
 
   const release = () => { stopRepeat(); touchSoftDrop = false; };

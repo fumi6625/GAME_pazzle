@@ -20,7 +20,14 @@
         <!-- 中央：盤面 -->
         <main class="main">
           <header class="topbar">
-            <h1 class="logo"><span class="logo-a">LUMINA</span><span class="logo-b">ARISE</span></h1>
+            <div class="topbar-row">
+              <h1 class="logo"><span class="logo-a">LUMINA</span><span class="logo-b">ARISE</span></h1>
+              <!-- 誤操作しやすいボタンは画面上端に隔離する -->
+              <div class="toptouch">
+                <button class="tbtn tbtn-sm" data-act="pause" aria-label="一時停止">II</button>
+                <button class="tbtn tbtn-sm" data-act="mute" aria-label="ミュート">♪</button>
+              </div>
+            </div>
             <p class="tagline">SYNAESTHETIC BLOCK SEQUENCER</p>
           </header>
 
@@ -78,18 +85,10 @@
             </div>
           </div>
 
-          <!-- タッチ操作（スマホ・タブレットでのみ表示。CSS の pointer:coarse で切替）-->
-          <div id="touchpad" class="touchpad">
-            <button class="tbtn" data-act="rotateCCW" aria-label="左回転">↺</button>
-            <button class="tbtn" data-act="left" aria-label="左へ移動">◀</button>
-            <button class="tbtn" data-act="right" aria-label="右へ移動">▶</button>
-            <button class="tbtn" data-act="rotateCW" aria-label="右回転">↻</button>
-            <button class="tbtn tbtn-drop" data-act="softDrop" aria-label="ソフトドロップ">▼</button>
-            <button class="tbtn tbtn-drop" data-act="hardDrop" aria-label="即落下">⤓</button>
-            <button class="tbtn tbtn-a" data-act="burst">BURST A</button>
-            <button class="tbtn tbtn-b" data-act="slow">BURST B</button>
-            <button class="tbtn tbtn-sm" data-act="pause">II</button>
-            <button class="tbtn tbtn-sm" data-act="mute">♪</button>
+          <!-- 親指で操作するための領域。盤面の下に置くことで、
+               ドラッグ中も指がコマにかからない。盤面と同じジェスチャを受ける。 -->
+          <div id="dragzone" class="dragzone" aria-hidden="true">
+            <span class="dragzone-hint">ドラッグ＝移動 ／ タップ＝右回転 ／ 上下スワイプ＝落下</span>
           </div>
 
           <footer class="foot">
@@ -154,6 +153,18 @@
             </ul>
           </div>
         </aside>
+
+        <!-- タッチ操作（pointer:coarse の端末でのみ表示）。
+             左右移動は盤面のドラッグで行うのでボタンは置かない。
+             下から順に「回転（大・隣同士）」「BURST A/B」「ドロップ」。 -->
+        <div id="touchpad" class="touchpad">
+          <button class="tbtn tbtn-drop" data-act="softDrop" aria-label="ソフトドロップ">▼</button>
+          <button class="tbtn tbtn-drop" data-act="hardDrop" aria-label="即落下">⤓</button>
+          <button class="tbtn tbtn-a" data-act="burst">BURST A</button>
+          <button class="tbtn tbtn-b" data-act="slow">BURST B</button>
+          <button class="tbtn tbtn-rot" data-act="rotateCCW" aria-label="左回転">↺</button>
+          <button class="tbtn tbtn-rot" data-act="rotateCW" aria-label="右回転">↻</button>
+        </div>
       </div>
     </div>
   </div>

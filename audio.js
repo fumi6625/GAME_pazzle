@@ -37,6 +37,8 @@ const GameAudio = (() => {
   const HEADROOM = 1.083;               // ステム合計を元のミックス音量へ戻す係数
 
   const BASE = "PRISM_SHUFFLE/";
+  // ループの正確な長さ（README の 2,508,800 サンプル @44.1kHz）
+  const LOOP_FRAMES_44K = 2508800;
   const STEMS = ["01_drums", "02_bass", "03_chords", "04_melody", "05_atmos"];
   // レイヤー: 0=常時 / 1=標準以上 / 2=高揚のみ
   const STEM_TIER = { "01_drums": 0, "02_bass": 0, "05_atmos": 0, "03_chords": 1, "04_melody": 2 };
@@ -76,12 +78,40 @@ const GameAudio = (() => {
     }));
   }
 
+  // AAC はエンコーダ遅延と末尾パディングが入るため、デコード後の長さが
+  // 原音と一致しない。サンプル単位のシームレスループが命なので、
+  // 仕様どおりの長さへ切り揃える（不足分は無音で埋める）。
+  function trimToLoop(buf) {
+    const want = Math.round(LOOP_FRAMES_44K * (buf.sampleRate / 44100));
+    if (buf.length === want) return buf;
+    const out = ctx.createBuffer(buf.numberOfChannels, want, buf.sampleRate);
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+      const src = buf.getChannelData(ch);
+      out.getChannelData(ch).set(src.subarray(0, Math.min(want, src.length)));
+    }
+    return out;
+  }
+
+  // 配信サイズを抑えた m4a（約5MB）を優先し、無ければ原音の wav（約47MB）を使う。
+  // スマホの回線で 47MB を落とすのは現実的でないため。
+  // AAC を復号できない環境（コーデック非搭載の Chromium など）もあるので、
+  // 失敗したら黙って wav へ落とす。iOS Safari と通常の Chrome は AAC を復号できる。
+  let stemSource = "";
+  async function fetchStem(n) {
+    for (const [dir, ext] of [["stems_web/", ".m4a"], ["stems/", ".wav"]]) {
+      try {
+        const r = await fetch(BASE + dir + n + ext);
+        if (!r.ok) continue;
+        const buf = trimToLoop(await ctx.decodeAudioData(await r.arrayBuffer()));
+        stemSource = ext;
+        return buf;
+      } catch (e) { /* 次の候補へ */ }
+    }
+    throw new Error("stem not found: " + n);
+  }
+
   async function loadStems() {
-    const got = await Promise.all(STEMS.map(async (n) => {
-      const r = await fetch(BASE + "stems/" + n + ".wav");
-      if (!r.ok) throw new Error("http " + r.status);
-      return [n, await ctx.decodeAudioData(await r.arrayBuffer())];
-    }));
+    const got = await Promise.all(STEMS.map(async (n) => [n, await fetchStem(n)]));
     got.forEach(([n, b]) => { stemBufs[n] = b; });
   }
 
@@ -311,6 +341,8 @@ const GameAudio = (() => {
     toggleMute, isMuted,
     bpm: BPM, bars: BARS, loopSeconds: LOOP_SEC,
     get usingFallback() { return usingFallback; },
+    get stemSource() { return stemSource; },
+    get stemFrames() { const b = stemBufs["01_drums"]; return b ? b.length : 0; },
     get loaded() { return ready; },
   };
 })();
