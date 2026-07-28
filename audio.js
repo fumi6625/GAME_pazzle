@@ -4,9 +4,15 @@
  * 自前のシンセ合成をやめ、PRISM_SHUFFLE/ の素材をそのまま鳴らす方式に切り替えた。
  * 仕様は PRISM_SHUFFLE/README.md に従う（数値はすべて実ファイルで検証済み）:
  *
- *   テンポ      135 BPM（1拍 0.444444s / 1小節 1.777778s / 16分 0.111111s）
- *   ループ      32小節 = 56.888889s = 2,508,800 サンプル @44.1kHz（サンプル単位で正確）
- *   スウィング  裏16分を 13.33ms 後ろへ（16分の12%）
+ *   テンポ      96 BPM（1拍 0.625s / 1小節 2.5s / 16分 0.15625s）
+ *   ループ      32小節 = 80.000000s = 3,528,000 サンプル @44.1kHz（サンプル単位で正確）
+ *   スウィング  裏16分を 18.75ms 後ろへ（16分の12%）
+ *
+ *   ※ 96 BPM は「タイムラインが16列を5.000秒で渡り切る」ことから決めた。
+ *      16列 = 2小節を保つと 8拍 = 5.000秒 → 96.000 BPM ちょうど。
+ *      2小節は32小節ループを割り切るので、曲の切り替わりと掃引の頭がずっと一致する。
+ *      素材は 135 BPM 版から作り直してある（ドラムは16分スライスの貼り直し、
+ *      他はフェーズボコーダ。詳細は PRISM_SHUFFLE/README.md）。
  *   調          F ドリアン / 操作音は F マイナーペンタトニック
  *
  * ■ ステム（音楽）
@@ -27,18 +33,18 @@ const GameAudio = (() => {
   "use strict";
 
   // ===== グリッド定数（README の値）=====
-  const BPM = 135;
-  const spb = 60 / BPM;                 // 0.444444s
-  const STEP = spb / 4;                 // 0.111111s
-  const BAR = spb * 4;                  // 1.777778s
+  const BPM = 96;
+  const spb = 60 / BPM;                 // 0.625s
+  const STEP = spb / 4;                 // 0.15625s
+  const BAR = spb * 4;                  // 2.5s
   const BARS = 32;
-  const LOOP_SEC = BARS * BAR;          // 56.888889s
-  const SWING = 0.01333;                // 裏16分の遅らせ量（秒）
+  const LOOP_SEC = BARS * BAR;          // 80.000000s
+  const SWING = 0.01875;                // 裏16分の遅らせ量（16分の12%）
   const HEADROOM = 1.083;               // ステム合計を元のミックス音量へ戻す係数
 
   const BASE = "PRISM_SHUFFLE/";
-  // ループの正確な長さ（README の 2,508,800 サンプル @44.1kHz）
-  const LOOP_FRAMES_44K = 2508800;
+  // ループの正確な長さ（3,528,000 サンプル @44.1kHz = 80.000秒）
+  const LOOP_FRAMES_44K = 3528000;
   const STEMS = ["01_drums", "02_bass", "03_chords", "04_melody", "05_atmos"];
   // レイヤー: 0=常時 / 1=標準以上 / 2=高揚のみ
   const STEM_TIER = { "01_drums": 0, "02_bass": 0, "05_atmos": 0, "03_chords": 1, "04_melody": 2 };

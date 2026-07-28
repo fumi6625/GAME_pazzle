@@ -301,7 +301,7 @@ body {
 }
 .next-inline #next {
   display: block;
-  width: 62px;
+  width: 115px;
   height: 62px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--line-soft);
@@ -668,7 +668,18 @@ kbd {
   z-index: 5;
 }
 .overlay.hidden { display: none; }
-.overlay-inner { text-align: center; line-height: 1.6; }
+/* 中身は必ずオーバーレイの中に収める。収まらないぶんはここでスクロールさせ、
+   盤面の枠からはみ出して他の要素と重なるのを防ぐ。 */
+.overlay-inner {
+  text-align: center;
+  line-height: 1.6;
+  max-width: 100%;
+  max-height: 100%;
+  padding: 10px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 
 .overlay-kicker {
   font-size: 9px;
@@ -949,7 +960,7 @@ kbd {
 
   .board-top { gap: 10px; margin-bottom: 6px; padding-bottom: 6px; }
   .level-value { font-size: 20px; }
-  .next-inline #next { width: 48px; height: 48px; }
+  .next-inline #next { width: 89px; height: 48px; }
 
   .hud {
     width: 100%;
@@ -976,7 +987,7 @@ kbd {
   .board-top { margin-bottom: 3px; padding-bottom: 4px; border-bottom: 0; gap: 12px; }
   .next-inline { gap: 6px; }
   .next-inline .stat-label { font-size: 7px; letter-spacing: 0.16em; }
-  .next-inline #next { width: 56px; height: 56px; }
+  .next-inline #next { width: 104px; height: 56px; }
   /* 統計は1行に詰めて、浮いた高さを盤面に回す */
   .hud { gap: 6px 12px; }
   .stat-hero { flex: 0 0 auto; }
@@ -1008,7 +1019,8 @@ kbd {
     padding: 6px calc(6px + env(safe-area-inset-right)) 6px calc(6px + env(safe-area-inset-left));
     height: 100dvh;
   }
-  .layout { flex-direction: row; gap: 8px; align-items: stretch; height: 100%; }
+  /* nowrap は必須: 狭い横画面だと後段の flex-wrap:wrap で操作列が下へ落ちる */
+  .layout { flex-direction: row; flex-wrap: nowrap; gap: 8px; align-items: stretch; height: 100%; }
   .tagline, .foot { display: none; }
   /* 見出しは流れから外し、その高さぶんだけ盤面を上に上げる。
      一時停止/ミュートは画面右上（操作ボタンから最も遠い場所）に固定。 */
@@ -1027,10 +1039,11 @@ kbd {
   /* .main は「上に詰める」縦フレックス。余った下側は丸ごとドラッグ領域に渡す。 */
   .main { order: 1; width: auto; flex: 1 1 auto; min-width: 0; min-height: 0;
           display: flex; flex-direction: column; justify-content: flex-start; }
-  .hud   { order: 2; width: 128px; flex: 0 0 128px; flex-direction: column;
+  .hud   { order: 2; width: 118px; flex: 0 0 118px; flex-direction: column;
            gap: 5px; padding-top: 0; overflow-y: auto; }
-  .touchpad { order: 3; width: 132px; flex: 0 0 132px;
-              align-content: center; gap: 5px; }
+  /* 操作列は指のサイズで決める。盤面は残りに収める。 */
+  .touchpad { order: 3; width: 186px; flex: 0 0 186px;
+              align-content: center; gap: 7px; }
 
   .topbar, .board-top, .board-wrap { flex: 0 0 auto; }
   .board-wrap { padding: 4px; display: flex; align-items: center; justify-content: center; }
@@ -1074,7 +1087,7 @@ kbd {
     touch-action: none;
   }
   .dragzone:active { background: rgba(92, 228, 255, 0.12); }
-  .next-inline #next { width: 34px; height: 34px; }
+  .next-inline #next { width: 74px; height: 40px; }
   .level-value { font-size: 14px; }
 
   .hud > * { flex: 0 0 auto; }
@@ -1082,9 +1095,26 @@ kbd {
   .stat-grid { gap: 6px; }
   .stat-grid .stat-value { font-size: 12px; }
 
-  .tbtn { min-height: 34px; font-size: 15px; }
-  .tbtn-hard { min-height: 44px; font-size: 22px; }
-  .tbtn-rot { min-height: 74px; font-size: 34px; }
-  .tbtn-a, .tbtn-b { min-height: 34px; font-size: 9px; letter-spacing: 0.1em; }
-  .tbtn-sm { min-height: 26px; font-size: 11px; }
+  /* 操作ボタンは指で押すものなので、横持ちでも十分な大きさを確保する。
+     そのぶん列幅を広げ、盤面は残りの幅に収める。 */
+  .tbtn { min-height: 46px; font-size: 19px; }
+  .tbtn-hard { min-height: 58px; font-size: 30px; }
+  .tbtn-rot { min-height: 92px; font-size: 44px; }
+  .tbtn-a, .tbtn-b { min-height: 50px; font-size: 11px; letter-spacing: 0.1em; }
+  .tbtn-sm { min-height: 30px; min-width: 40px; font-size: 12px; }
+
+  /* ゲームオーバー/スタートの内容を縦の狭さに合わせて詰める */
+  .overlay-inner { padding: 6px 10px; }
+  .overlay-kicker { font-size: 8px; letter-spacing: 0.34em; }
+  .overlay-title { font-size: 20px; margin-top: 2px; }
+  .overlay-sub { font-size: 11px; margin-top: 4px; }
+  .overlay-hint { margin-top: 8px; font-size: 9px; }
+  .rank-panel { margin-top: 8px; }
+  .rank-list { max-height: 84px; }
+  .rank-title { font-size: 8px; }
+  .start-btn { margin-top: 10px; padding: 9px 26px; font-size: 10px; letter-spacing: 0.24em; }
+  .picker { margin-top: 10px; }
+  .picker-btn { padding: 6px 14px; }
+  .picker-desc { margin-top: 4px; font-size: 9px; }
+  .rank-note { font-size: 10px; }
 }

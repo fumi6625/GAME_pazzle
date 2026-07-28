@@ -55,8 +55,14 @@ const RANK_MAX = 10;
 
 // ===== 状態 =====
 let board, marked;
+// 消去のあと上のコマが落ちてくる見た目のためのオフセット（単位: マス）。
+// 論理座標はすでに落ちた後の位置で、描画だけを fallAnim ぶん上にずらして戻す。
+let fallAnim, fallVel;
 let bigSize, bigTop;            // 豪華コマ: 各セルが属する正方形の辺長 / 左上セルの辺長
-let current, nextPiece;
+let current;
+// 先読みキュー。先頭が次、その次が次の次。2手先まで見えると組み立てを計画できる。
+const NEXT_VIEW = 2;
+let nextQueue = [];
 let score, squaresCleared, combo, maxCombo;
 let level, nextLevelAt, levelFlash;
 let bestBig;                    // このプレイで作った最大の豪華コマ
@@ -266,7 +272,7 @@ function applyTheme() {
   for (const k in spriteCache) delete spriteCache[k];
   for (const k in bigSpriteCache) delete bigSpriteCache[k];
   renderThemePicker();
-  if (nextPiece) drawNext();
+  if (nextQueue.length) drawNext();
 }
 function setTheme(id) {
   if (!THEMES.some((t) => t.id === id) || id === themeId) return;
@@ -607,6 +613,8 @@ function bigBlockSprite(color, n) {
 function init() {
   board = makeGrid(EMPTY);
   marked = makeGrid(false);
+  fallAnim = makeGrid(0);
+  fallVel = makeGrid(0);
   bigSize = makeGrid(0);
   bigTop = makeGrid(0);
   score = 0;
@@ -630,7 +638,8 @@ function init() {
   elapsedMs = 0;
   dangerLevel = 0;
   startTimeMs = performance.now();
-  nextPiece = randomCells();
+  nextQueue = [];
+  while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   Effects.reset();
   Effects.setBurstReady(false);
   Effects.setLevel(1);
@@ -643,8 +652,8 @@ function init() {
 // ===== ピース生成 =====
 function spawnPiece() {
   const startX = Math.floor(COLS / 2) - 1;
-  current = { x: startX, y: -2, cells: nextPiece };
-  nextPiece = randomCells();
+  current = { x: startX, y: -2, cells: nextQueue.shift() };
+  while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   drawNext();
   if (board[0][startX] !== EMPTY || board[0][startX + 1] !== EMPTY) {
     endGame();
@@ -735,11 +744,35 @@ function settleColumns() {
     for (let y = ROWS - 1; y >= 0; y--) {
       if (board[y][x] !== EMPTY) {
         board[write][x] = board[y][x];
-        if (write !== y) board[y][x] = EMPTY;
+        fallAnim[write][x] = (write - y) + fallAnim[y][x];
+        fallVel[write][x] = fallVel[y][x];
+        if (write !== y) {
+          board[y][x] = EMPTY;
+          fallAnim[y][x] = 0; fallVel[y][x] = 0;
+        }
         write--;
       }
     }
-    for (let y = write; y >= 0; y--) board[y][x] = EMPTY;
+    for (let y = write; y >= 0; y--) {
+      board[y][x] = EMPTY;
+      fallAnim[y][x] = 0; fallVel[y][x] = 0;
+    }
+  }
+}
+
+// 落下オフセットを重力で 0 へ戻す。1マスで約0.24秒、4マスで約0.49秒。
+// タイムラインが1列進むのが 0.31秒なので、それと同じ時間感覚に合わせてある。
+const FALL_G = 34;       // マス/秒^2
+const FALL_VMAX = 20;    // マス/秒
+function updateFall(dt) {
+  for (let y = 0; y < ROWS; y++) {
+    const fa = fallAnim[y], fv = fallVel[y];
+    for (let x = 0; x < COLS; x++) {
+      if (fa[x] <= 0) continue;
+      fv[x] = Math.min(FALL_VMAX, fv[x] + FALL_G * dt);
+      fa[x] -= fv[x] * dt;
+      if (fa[x] <= 0) { fa[x] = 0; fv[x] = 0; }
+    }
   }
 }
 
@@ -774,11 +807,20 @@ function settleColumn(x) {
       board[write][x] = board[y][x];
       marked[write][x] = marked[y][x];
       bigSize[write][x] = bigSize[y][x];
-      if (write !== y) { board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0; }
+      // 落ちた距離を描画オフセットに足す（落下中にさらに落ちても破綻しない）
+      fallAnim[write][x] = (write - y) + fallAnim[y][x];
+      fallVel[write][x] = fallVel[y][x];
+      if (write !== y) {
+        board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0;
+        fallAnim[y][x] = 0; fallVel[y][x] = 0;
+      }
       write--;
     }
   }
-  for (let y = write; y >= 0; y--) { board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0; }
+  for (let y = write; y >= 0; y--) {
+    board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0;
+    fallAnim[y][x] = 0; fallVel[y][x] = 0;
+  }
 }
 
 // ===== タイムライン進行（音楽同期・本家準拠） =====
@@ -790,13 +832,15 @@ let sweepBase = 0;      // このスイープの基礎点（豪華コマの単�
 function advanceTimeline() {
   timelineCol++;
 
-  // スイープ完了 → 集計と再マッチ
+  // スイープ完了 → 集計と再マッチ。
+  // ここで -1（盤面外）に戻して1ステップ使ってしまうと、1周が 17ステップになり
+  // 16列ぶんの時間より 1列ぶん長くなる。折り返しは 0 列目に直結させて、
+  // 「16列ちょうどで1周 = 5.000秒」を保つ。
   if (timelineCol >= COLS) {
-    timelineCol = -1;
+    timelineCol = 0;
     resolveSweep();
     settleColumns();
     markMatches();
-    return;
   }
 
   const c = timelineCol;
@@ -1164,14 +1208,14 @@ function render() {
   for (let y = 0; y < ROWS; y++)
     for (let x = 0; x < COLS; x++)
       if (board[y][x] !== EMPTY && !bigSize[y][x])
-        drawCell(ctx, x, y, board[y][x], CELL, { marked: marked[y][x] });
+        drawCell(ctx, x, y - fallAnim[y][x], board[y][x], CELL, { marked: marked[y][x] });
 
   // 豪華コマ
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) {
       const n = bigTop[y][x];
       if (!n || board[y][x] === EMPTY) continue;
-      const px = x * CELL, py = y * CELL, sz = n * CELL;
+      const px = x * CELL, py = (y - fallAnim[y][x]) * CELL, sz = n * CELL;
       ctx.drawImage(bigBlockSprite(board[y][x], n), px, py);
       // 消去待ちの脈動（大きいほど強く光る）
       if (marked[y][x]) {
@@ -1315,14 +1359,25 @@ function render() {
   ctx.restore();
 }
 
+// NEXT は横並びで2手ぶん。次の次は一回り小さく描いて優先度の差を出す。
 function drawNext() {
-  nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
-  const size = 42;
-  const offX = (nextCanvas.width - size * 2) / 2;
-  const offY = (nextCanvas.height - size * 2) / 2;
-  for (let r = 0; r < 2; r++)
-    for (let c = 0; c < 2; c++)
-      nextCtx.drawImage(blockSprite(nextPiece[r][c], size), offX + c * size, offY + r * size);
+  const w = nextCanvas.width, h = nextCanvas.height;
+  nextCtx.clearRect(0, 0, w, h);
+  const s1 = Math.floor(h / 2);                 // 次
+  const s2 = Math.floor(s1 * 0.66);             // 次の次
+  const gap = Math.max(6, Math.round(w * 0.06));
+  const total = s1 * 2 + gap + s2 * 2;
+  let ox = Math.round((w - total) / 2);
+  for (let i = 0; i < Math.min(NEXT_VIEW, nextQueue.length); i++) {
+    const cells = nextQueue[i], sz = i === 0 ? s1 : s2;
+    const oy = Math.round((h - sz * 2) / 2);
+    nextCtx.globalAlpha = i === 0 ? 1 : 0.55;
+    for (let r = 0; r < 2; r++)
+      for (let c = 0; c < 2; c++)
+        nextCtx.drawImage(blockSprite(cells[r][c], sz), ox + c * sz, oy + r * sz);
+    ox += sz * 2 + gap;
+  }
+  nextCtx.globalAlpha = 1;
 }
 
 // ===== 背景リサイズ =====
@@ -1437,6 +1492,7 @@ function loop(now) {
     if (Math.floor(now / 250) !== Math.floor((now - dt * 1000) / 250)) updateHud();
   }
 
+  updateFall(dt);
   Effects.update(dt);
   render();
   requestAnimationFrame(loop);
@@ -1910,6 +1966,7 @@ document.addEventListener("keydown", (e) => {
     case "Shift": triggerSlow(); e.preventDefault(); break;     // BURST-B 減速
     case "p": case "P": if (!gameOver) paused = !paused; break;
     case "r": case "R": init(); break;
+    case "h": case "H": goHome(); break;
     case "m": case "M": GameAudio.toggleMute(); break;
   }
 });
@@ -1917,8 +1974,38 @@ document.addEventListener("keyup", (e) => {
   if (e.key === "ArrowDown") softDrop = false;
 });
 
+// ホーム（スタート画面）へ戻る。デザイン選択とチュートリアルはここからしか
+// 触れないので、ゲームオーバーからは必ず戻れるようにしておく。
+function goHome() {
+  tutorialMode = false;
+  tutEl.classList.add("hidden");
+  document.body.classList.remove("tut-on");
+  running = false;
+  gameOver = false;
+  paused = false;
+  current = null;
+  board = makeGrid(EMPTY);
+  marked = makeGrid(false);
+  bigSize = makeGrid(0);
+  bigTop = makeGrid(0);
+  fallAnim = makeGrid(0);
+  timelineCol = -1;
+  timelineBeat = 0;
+  burstGauge = 0;
+  burstReady = false;
+  slowTimer = 0;
+  Effects.reset();
+  Effects.setBurstReady(false);
+  GameAudio.setIntensity(1);
+  overOverlay.classList.add("hidden");
+  startOverlay.classList.remove("hidden");
+  renderRanking(startRankEl, loadRanking(), null);
+  updateHud();
+}
+
 document.getElementById("start-btn").addEventListener("click", () => startGame());
 document.getElementById("retry-btn").addEventListener("click", () => init());
+document.getElementById("home-btn").addEventListener("click", (e) => { e.stopPropagation(); goHome(); });
 
 // ===== デザイン切り替えの UI =====
 const themePickerEl = document.getElementById("theme-picker");
@@ -1961,6 +2048,13 @@ window.LUMINA = {
   },
   get paused() { return paused; },
   get maxCombo() { return maxCombo; },
+  nextQueue() { return nextQueue.map((c) => c.map((r) => r.slice())); },
+  fallMax() {
+    let m = 0;
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++)
+      if (fallAnim[y][x] > m) m = fallAnim[y][x];
+    return m;
+  },
   get timelineCol() { return timelineCol; },
   get theme() { return themeId; },
   get tutStep() { return tutStep; },
@@ -2185,8 +2279,10 @@ running = false;
 lastTime = performance.now();
 board = makeGrid(EMPTY);
 marked = makeGrid(false);
+fallAnim = makeGrid(0);
+fallVel = makeGrid(0);
 current = null;
-nextPiece = randomCells();
+nextQueue = [randomCells(), randomCells()];
 level = 1;
 nextLevelAt = levelNeed(1);
 bigSize = makeGrid(0);
