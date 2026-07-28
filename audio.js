@@ -33,18 +33,43 @@ const GameAudio = (() => {
   "use strict";
 
   // ===== グリッド定数（README の値）=====
-  const BPM = 96;
-  const spb = 60 / BPM;                 // 0.625s
-  const STEP = spb / 4;                 // 0.15625s
-  const BAR = spb * 4;                  // 2.5s
+  // ===== 曲テーブル =====
+  // 参考動画（RTA in Japan / ルミネス リマスター）では、タイムラインの1周が
+  // スキン（＝曲）ごとに 4.0〜5.6 秒と違っていた。掃引の速さは曲のテンポで
+  // 決まるのが本家の設計なので、テンポの違う曲を用意して切り替える。
+  // 掃引は常に「2小節 = 16列」なので、BPM が決まれば掃引時間も決まる。
+  //
+  // BPM はすべて 32小節ぶんが 44100Hz でサンプル単位に割り切れる値。
+  // 端数が出るとループのたびに位相がずれて、掃引と音がずれていく。
   const BARS = 32;
-  const LOOP_SEC = BARS * BAR;          // 80.000000s
-  const SWING = 0.01875;                // 裏16分の遅らせ量（16分の12%）
+  const SWING_RATIO = 0.12;             // 裏16分を16分の12%だけ後ろへ
   const HEADROOM = 1.083;               // ステム合計を元のミックス音量へ戻す係数
 
-  const BASE = "PRISM_SHUFFLE/";
-  // ループの正確な長さ（3,528,000 サンプル @44.1kHz = 80.000秒）
-  const LOOP_FRAMES_44K = 3528000;
+  const TRACKS = [
+    { id: "PRISM_SHUFFLE", title: "PRISM SHUFFLE", genre: "ビッグビート / ファンク",
+      bpm: 96, base: "PRISM_SHUFFLE/", loop: "PRISM_SHUFFLE_loop" },
+    { id: "NEON_MARCH", title: "NEON MARCH", genre: "4つ打ちテクノ",
+      bpm: 120, base: "PRISM_SHUFFLE/NEON_MARCH/", loop: "loop" },
+    { id: "CIRCUIT_RUSH", title: "CIRCUIT RUSH", genre: "エレクトロ・ブレイクス",
+      bpm: 112, base: "PRISM_SHUFFLE/CIRCUIT_RUSH/", loop: "loop" },
+    { id: "GLASS_TIDE", title: "GLASS TIDE", genre: "ダウンテンポ・ダブ",
+      bpm: 84, base: "PRISM_SHUFFLE/GLASS_TIDE/", loop: "loop" },
+  ];
+  TRACKS.forEach((t) => {
+    t.spb = 60 / t.bpm;
+    t.step = t.spb / 4;
+    t.bar = t.spb * 4;
+    t.loopSec = BARS * t.bar;
+    t.swing = t.step * SWING_RATIO;
+    t.frames44k = Math.round(t.loopSec * 44100);
+    t.sweepSec = t.bar * 2;             // 16列 = 2小節
+  });
+
+  let trackIdx = 0;
+  const T = () => TRACKS[trackIdx];
+  // 旧コードとの互換のため、いまの曲の値を返す薄い別名を置く
+  const spbOf = () => T().spb;
+  const BAR_OF = () => T().bar;
   const STEMS = ["01_drums", "02_bass", "03_chords", "04_melody", "05_atmos"];
   // レイヤー: 0=常時 / 1=標準以上 / 2=高揚のみ
   const STEM_TIER = { "01_drums": 0, "02_bass": 0, "05_atmos": 0, "03_chords": 1, "04_melody": 2 };
@@ -87,8 +112,8 @@ const GameAudio = (() => {
   // AAC はエンコーダ遅延と末尾パディングが入るため、デコード後の長さが
   // 原音と一致しない。サンプル単位のシームレスループが命なので、
   // 仕様どおりの長さへ切り揃える（不足分は無音で埋める）。
-  function trimToLoop(buf) {
-    const want = Math.round(LOOP_FRAMES_44K * (buf.sampleRate / 44100));
+  function trimToLoop(buf, track) {
+    const want = Math.round((track || T()).frames44k * (buf.sampleRate / 44100));
     if (buf.length === want) return buf;
     const out = ctx.createBuffer(buf.numberOfChannels, want, buf.sampleRate);
     for (let ch = 0; ch < buf.numberOfChannels; ch++) {
@@ -103,27 +128,64 @@ const GameAudio = (() => {
   // AAC を復号できない環境（コーデック非搭載の Chromium など）もあるので、
   // 失敗したら黙って wav へ落とす。iOS Safari と通常の Chrome は AAC を復号できる。
   let stemSource = "";
-  async function fetchStem(n) {
-    for (const [dir, ext] of [["stems_web/", ".m4a"], ["stems/", ".wav"]]) {
+  // どの形式から試すかを先に決める。全部試すと、復号できない形式まで
+  // ダウンロードしてしまい通信量が倍になるため。
+  function codecOrder() {
+    const a = document.createElement("audio");
+    const aac = a.canPlayType('audio/mp4; codecs="mp4a.40.2"');
+    const ogg = a.canPlayType('audio/ogg; codecs="vorbis"');
+    const m4a = ["stems_web/", ".m4a"], og = ["stems_web/", ".ogg"], wav = ["stems/", ".wav"];
+    if (aac) return [m4a, og, wav];        // iOS Safari / 通常の Chrome
+    if (ogg) return [og, m4a, wav];        // AAC 非搭載のビルド
+    return [wav, m4a, og];
+  }
+  let CODECS = null;
+
+  async function fetchStem(track, n) {
+    // m4a … iOS Safari 用（必須）。ogg … Chrome/Firefox 用で m4a より小さい。
+    // wav … 原音。AAC も Vorbis も復号できない環境の最後の砦。
+    if (!CODECS) CODECS = codecOrder();
+    for (const [dir, ext] of CODECS) {
       try {
-        const r = await fetch(BASE + dir + n + ext);
+        const r = await fetch(track.base + dir + n + ext);
         if (!r.ok) continue;
-        const buf = trimToLoop(await ctx.decodeAudioData(await r.arrayBuffer()));
+        const buf = trimToLoop(await ctx.decodeAudioData(await r.arrayBuffer()), track);
         stemSource = ext;
         return buf;
       } catch (e) { /* 次の候補へ */ }
     }
-    throw new Error("stem not found: " + n);
+    throw new Error("stem not found: " + track.id + "/" + n);
   }
 
-  async function loadStems() {
-    const got = await Promise.all(STEMS.map(async (n) => [n, await fetchStem(n)]));
-    got.forEach(([n, b]) => { stemBufs[n] = b; });
+  // 曲ごとにステムを持つ。読み込み済みなら使い回す。
+  const bufsByTrack = {};
+  const loading = {};
+  async function loadStems(track) {
+    if (bufsByTrack[track.id]) return bufsByTrack[track.id];
+    if (loading[track.id]) return loading[track.id];
+    loading[track.id] = (async () => {
+      const got = await Promise.all(STEMS.map(async (n) => [n, await fetchStem(track, n)]));
+      const m = {};
+      got.forEach(([n, b]) => { m[n] = b; });
+      bufsByTrack[track.id] = m;
+      return m;
+    })();
+    try { return await loading[track.id]; }
+    finally { delete loading[track.id]; }
+  }
+
+  // 次の曲を先に読んでおく。レベルアップの瞬間に読み込みが始まると
+  // 切り替わりが1秒ほど遅れて、掃引と曲がずれて聞こえるため。
+  function prefetchTrack(i) {
+    if (usingFallback || !ctx) return;
+    const t = TRACKS[((i % TRACKS.length) + TRACKS.length) % TRACKS.length];
+    if (bufsByTrack[t.id] || loading[t.id]) return;
+    loadStems(t).catch(() => {});
   }
 
   function setupFallback() {
     usingFallback = true;
-    fallbackEl = new Audio(BASE + "PRISM_SHUFFLE_loop.m4a");
+    fallbackEl = new Audio(T().base + T().loop + ".m4a");
     fallbackEl.loop = true;
     fallbackEl.preload = "auto";
     try {
@@ -161,7 +223,7 @@ const GameAudio = (() => {
       setupFallback();
     } else {
       try {
-        await loadStems();
+        stemBufs = await loadStems(T());
       } catch (e) {
         setupFallback();
       }
@@ -221,9 +283,9 @@ const GameAudio = (() => {
     if (!ctx || !started) return 0;
     return Math.max(0, ctx.currentTime - startTime);
   }
-  function beatPhase() { const p = (elapsed() / spb) % 1; return p < 0 ? p + 1 : p; }
-  function barPhase() { const p = (elapsed() / BAR) % 1; return p < 0 ? p + 1 : p; }
-  function barNow() { return Math.floor(elapsed() / BAR) % BARS; }
+  function beatPhase() { const p = (elapsed() / T().spb) % 1; return p < 0 ? p + 1 : p; }
+  function barPhase() { const p = (elapsed() / T().bar) % 1; return p < 0 ? p + 1 : p; }
+  function barNow() { return Math.floor(elapsed() / T().bar) % BARS; }
   // 背景演出用に 32小節を 5 場面へ割り当てる
   function section() {
     const b = barNow();
@@ -239,8 +301,8 @@ const GameAudio = (() => {
   // README の推奨どおり小節境界で 0.2-0.4秒かけてクロスフェードする。
   function nextBarTime() {
     if (!ctx || !started) return ctx ? ctx.currentTime : 0;
-    const n = Math.ceil((ctx.currentTime - startTime) / BAR);
-    return startTime + n * BAR;
+    const n = Math.ceil((ctx.currentTime - startTime) / T().bar);
+    return startTime + n * T().bar;
   }
   function applyIntensity(fade) {
     if (usingFallback || !started || !ctx) return;
@@ -266,12 +328,12 @@ const GameAudio = (() => {
   function grid(lead = 0.012) {
     if (!ctx) return 0;
     if (!started) return ctx.currentTime + 0.001;
-    const n = Math.ceil((ctx.currentTime + lead - startTime) / STEP);
-    return startTime + n * STEP + (n % 2 === 1 ? SWING : 0);
+    const n = Math.ceil((ctx.currentTime + lead - startTime) / T().step);
+    return startTime + n * T().step + (n % 2 === 1 ? T().swing : 0);
   }
   // 同じ16分に同じ音が重なるのを防ぐ
   function slotOK(key, t) {
-    const k = Math.round((t - startTime) / STEP);
+    const k = Math.round((t - startTime) / T().step);
     if (lastSlot.get(key) === k) return false;
     lastSlot.set(key, k);
     return true;
@@ -338,14 +400,77 @@ const GameAudio = (() => {
   }
   function isMuted() { return muted; }
 
+  // ===== 曲の切り替え =====
+  // 曲が変わるとテンポが変わり、タイムラインの掃引時間と落下速度も一緒に変わる
+  // （game.js 側は「拍」で持っているので、BPM が変われば自動で追従する）。
+  // 切り替えは今の曲を素早くフェードアウトしてから新しい曲を頭から始める。
+  // 小節の途中で切っても、次の曲は自分の頭から始まるのでグリッドは崩れない。
+  let switching = false;
+  async function setTrack(i, fade = 0.6) {
+    const n = ((i % TRACKS.length) + TRACKS.length) % TRACKS.length;
+    if (n === trackIdx || switching || !ctx) return false;
+    switching = true;
+    try {
+      const next = TRACKS[n];
+      let bufs = null;
+      if (!usingFallback) {
+        try { bufs = await loadStems(next); }
+        catch (e) { switching = false; return false; }   // 読めなければ今の曲を続ける
+      }
+      const t0 = ctx.currentTime;
+      if (started && !usingFallback) {
+        STEMS.forEach((k) => {
+          const g = stemGain[k];
+          if (!g) return;
+          g.gain.cancelScheduledValues(t0);
+          g.gain.setValueAtTime(g.gain.value, t0);
+          g.gain.linearRampToValueAtTime(0, t0 + fade);
+        });
+        const old = stemSrc;
+        setTimeout(() => {
+          STEMS.forEach((k) => { try { old[k] && old[k].stop(); } catch (e) {} });
+        }, (fade + 0.1) * 1000);
+      }
+      trackIdx = n;
+      if (bufs) stemBufs = bufs;
+      if (started) {
+        if (usingFallback) {
+          if (fallbackEl) {
+            fallbackEl.pause();
+            fallbackEl.src = next.base + next.loop + ".m4a";
+            fallbackEl.play().catch(() => {});
+          }
+          startTime = ctx.currentTime;
+        } else {
+          startTime = t0 + fade;
+          stemGain = {}; stemSrc = {};
+          startStems(startTime);
+          applyIntensity(0.4);
+        }
+      }
+      return true;
+    } finally {
+      switching = false;
+    }
+  }
+
   return {
     start, stop, preload, beatPhase, barPhase, section, now,
-    secondsPerBeat: spb, setIntensity,
+    setIntensity, setTrack, prefetchTrack,
     playClear, playLock, playSquare, playCombo, playBurst, playGameOver,
     playRotate, playMove, playDrop, playBurstReady, playLevelUp, playGrand,
     playSlow, playSlowEnd, playInvalid,
     toggleMute, isMuted,
-    bpm: BPM, bars: BARS, loopSeconds: LOOP_SEC,
+    bars: BARS,
+    // テンポ系はすべて「いまの曲」の値を返す。game.js はこれを見て
+    // 掃引と落下の速さを決めるので、曲が変わればゲームの速さも変わる。
+    get bpm() { return T().bpm; },
+    get secondsPerBeat() { return T().spb; },
+    get loopSeconds() { return T().loopSec; },
+    get sweepSeconds() { return T().sweepSec; },
+    get trackIndex() { return trackIdx; },
+    get track() { const t = T(); return { id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, sweepSec: t.sweepSec }; },
+    get trackList() { return TRACKS.map((t) => ({ id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, sweepSec: t.sweepSec })); },
     get usingFallback() { return usingFallback; },
     get stemSource() { return stemSource; },
     get stemFrames() { const b = stemBufs["01_drums"]; return b ? b.length : 0; },

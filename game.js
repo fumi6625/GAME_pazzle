@@ -103,6 +103,7 @@ const startRankEl = document.getElementById("start-rank");
 const overRankNoteEl = document.getElementById("over-rank-note");
 const levelNextEl = document.getElementById("level-next");
 const slowLeftEl = document.getElementById("slow-left");
+const trackNameEl = document.getElementById("track-name");
 
 // ===== ユーティリティ =====
 function makeGrid(fill) {
@@ -156,7 +157,42 @@ function checkLevelUp() {
     }
     GameAudio.playLevelUp(level);
     padRumble(0.5, 0.6, 260);
+    maybeChangeTrack();
   }
+}
+
+// ===== 曲の切り替え =====
+// レベルが5上がるごとに次の曲へ。曲ごとに BPM が違うので、
+// タイムラインの掃引時間も落下速度も一緒に変わる（どちらも拍で持っているため）。
+const TRACK_EVERY_LEVELS = 5;
+function trackIndexForLevel(l) {
+  const n = (GameAudio.trackList || []).length || 1;
+  return Math.floor((l - 1) / TRACK_EVERY_LEVELS) % n;
+}
+function renderTrackName() {
+  if (!trackNameEl || !GameAudio.track) return;
+  const t = GameAudio.track;
+  trackNameEl.innerHTML = "";
+  trackNameEl.appendChild(document.createTextNode(t.title));
+  const sm = document.createElement("small");
+  sm.textContent = `${t.genre} / ${t.bpm} BPM / ライン ${t.sweepSec.toFixed(2)}秒`;
+  trackNameEl.appendChild(sm);
+}
+
+function maybeChangeTrack() {
+  if (!GameAudio.setTrack) return;
+  // 次の曲を先読みしておく（切り替えの瞬間に取りに行くと間に合わない）
+  if (GameAudio.prefetchTrack) GameAudio.prefetchTrack(trackIndexForLevel(level) + 1);
+  const want = trackIndexForLevel(level);
+  if (want === GameAudio.trackIndex) return;
+  Promise.resolve(GameAudio.setTrack(want)).then((ok) => {
+    if (!ok) return;
+    const t = GameAudio.track;
+    Effects.banner("♪ " + t.title, "#ffe27a",
+      t.genre + "  /  " + t.bpm + " BPM  /  ライン " + t.sweepSec.toFixed(2) + "秒");
+    renderTrackName();
+    updateHud();
+  });
 }
 
 // ===== 豪華コマの検出 =====
@@ -644,6 +680,8 @@ function init() {
   Effects.setBurstReady(false);
   Effects.setLevel(1);
   GameAudio.setIntensity(1);
+  if (GameAudio.setTrack) Promise.resolve(GameAudio.setTrack(0, 0.25)).then(renderTrackName);
+  renderTrackName();
   spawnPiece();
   updateHud();
   overOverlay.classList.add("hidden");
@@ -2088,6 +2126,7 @@ window.LUMINA = {
   },
   get paused() { return paused; },
   get maxCombo() { return maxCombo; },
+  get quality() { return quality; },
   comboMult() { return comboMult(); },
   nextQueue() { return nextQueue.map((c) => c.map((r) => r.slice())); },
   fallMax() {

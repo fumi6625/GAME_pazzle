@@ -857,6 +857,16 @@ kbd {
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* いま流れている曲。曲が変わるとタイムラインの速さも変わるので、
+   何が鳴っているかを常に見えるようにしておく。 */
+.track-name {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  line-height: 1.45;
+  color: var(--accent-3);
+}
+.track-name small { display: block; font-size: 9px; color: var(--dim); letter-spacing: 0.1em; }
+
 /* ===== チュートリアル ===== */
 .tut.hidden { display: none; }
 .tut {

@@ -1,1 +1,10 @@
 『ルミネス アライズ』プレイ映像。こだわりの詰まったエフェクトや演出が満載でトリップ感さらにマシマシ.mp4
+
+# 新曲の原音 WAV は配信に使わない（m4a + ogg で iOS Safari も Chrome も Firefox も賄える）。
+# 260MB あり、リポジトリに置く意味がないので除外する。tools/compose.py で再生成できる。
+PRISM_SHUFFLE/NEON_MARCH/stems/
+PRISM_SHUFFLE/CIRCUIT_RUSH/stems/
+PRISM_SHUFFLE/GLASS_TIDE/stems/
+PRISM_SHUFFLE/NEON_MARCH/loop.wav
+PRISM_SHUFFLE/CIRCUIT_RUSH/loop.wav
+PRISM_SHUFFLE/GLASS_TIDE/loop.wav
