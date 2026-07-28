@@ -873,7 +873,15 @@ function triggerBurst() {
 function updateHud() {
   scoreEl.textContent = score;
   squaresEl.textContent = Math.floor(squaresCleared);
+  // HUD の COMBO も盤面のハイライトと同じ色にして、両者が同じ状態を指すようにする
   comboEl.textContent = combo;
+  if (comboEl) {
+    const T = comboTier();
+    comboEl.style.color = combo >= 1 ? rgbaOf(T.edge, 1) : "";
+    comboEl.style.textShadow = combo >= 1
+      ? `0 0 ${8 + T.power * 8}px ${rgbaOf(T.halo, 0.9)}` : "";
+    comboEl.classList.toggle("chaining", combo >= 2);
+  }
   const s = Math.floor(elapsedMs / 1000);
   timeEl.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   burstFillEl.style.width = (burstGauge / BURST_MAX * 100) + "%";
@@ -938,23 +946,61 @@ function endGame() {
 }
 
 // ===== 描画 =====
+/*
+ * 消去待ちハイライトの色は「いま何連鎖目か」で変わる。
+ * 連鎖していない時は従来どおり白。連鎖が乗ると 金 → 橙 → マゼンタ → 白熱 と
+ * 段階的に変わり、脈動が速く・強くなるので、盤面を見ているだけで連鎖中と分かる。
+ */
+const COMBO_TIERS = [
+  { edge: [255, 255, 255], halo: [190, 225, 255], rate: 110, power: 0.0 },  // 連鎖なし
+  { edge: [190, 255, 235], halo: [120, 255, 220], rate: 96,  power: 0.5 },  // 1連鎖
+  { edge: [255, 226, 122], halo: [255, 200, 90],  rate: 82,  power: 1.0 },  // 2連鎖
+  { edge: [255, 168, 64],  halo: [255, 140, 50],  rate: 68,  power: 1.5 },  // 3連鎖
+  { edge: [255, 108, 210], halo: [255, 80, 190],  rate: 56,  power: 2.0 },  // 4連鎖
+  { edge: [235, 255, 255], halo: [255, 255, 255], rate: 44,  power: 2.6 },  // 5連鎖以上
+];
+function comboTier() {
+  return COMBO_TIERS[Math.max(0, Math.min(COMBO_TIERS.length - 1, combo))];
+}
+const rgbaOf = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
 function drawCell(c, x, y, color, size, opts = {}) {
   c.drawImage(blockSprite(color, size), x * size, y * size);
   if (opts.marked) {
-    // 消去待ち: 白枠 + グローのパルス
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 110);
+    const T = comboTier();
+    // 連鎖が深いほど速く脈動する
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / T.rate);
     const px = x * size, py = y * size;
+
+    // 連鎖中は外側にハロー（滲み）を足して、ひと目で見分けられるようにする
+    if (T.power > 0) {
+      c.save();
+      c.globalCompositeOperation = "lighter";
+      c.globalAlpha = (0.16 + pulse * 0.22) * T.power;
+      const r = size * 0.9;
+      const g = c.createRadialGradient(px + size / 2, py + size / 2, size * 0.18,
+                                       px + size / 2, py + size / 2, r);
+      g.addColorStop(0, rgbaOf(T.halo, 0.85));
+      g.addColorStop(1, rgbaOf(T.halo, 0));
+      c.fillStyle = g;
+      c.fillRect(px - size * 0.4, py - size * 0.4, size * 1.8, size * 1.8);
+      c.restore();
+    }
+
+    // 本体の増光（連鎖が深いほど明るく）
     c.save();
     c.globalCompositeOperation = "lighter";
-    c.globalAlpha = 0.25 + pulse * 0.3;
+    c.globalAlpha = 0.25 + pulse * (0.3 + T.power * 0.14);
     c.drawImage(blockSprite(color, size), px, py);
     c.restore();
-    // 面取り八角形に沿った白枠のパルス
+
+    // 面取り八角形に沿った枠のパルス（色が連鎖段階を示す）
     c.save();
     c.translate(px, py);
     polyPath(c, facetPoints(size, Math.max(1.5, size * 0.045) + 1, size * 0.2, 1));
-    c.strokeStyle = `rgba(255,255,255,${0.45 + pulse * 0.5})`;
-    c.lineWidth = 2;
+    c.strokeStyle = rgbaOf(T.edge, 0.45 + pulse * 0.5);
+    c.lineWidth = 2 + T.power * 0.7;
+    if (T.power > 0) { c.shadowColor = rgbaOf(T.halo, 1); c.shadowBlur = 6 + T.power * 7; }
     c.stroke();
     c.restore();
   }
@@ -991,16 +1037,21 @@ function render() {
       ctx.drawImage(bigBlockSprite(board[y][x], n), px, py);
       // 消去待ちの脈動（大きいほど強く光る）
       if (marked[y][x]) {
-        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 100);
+        const T = comboTier();
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / T.rate);
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
-        ctx.globalAlpha = (0.18 + pulse * 0.3) * (1 + (n - 3) * 0.2);
+        ctx.globalAlpha = (0.18 + pulse * (0.3 + T.power * 0.12)) * (1 + (n - 3) * 0.2);
         ctx.drawImage(bigBlockSprite(board[y][x], n), px, py);
         ctx.restore();
-        ctx.strokeStyle = `rgba(255,232,150,${0.5 + pulse * 0.5})`;
-        ctx.lineWidth = 3;
+        // 豪華コマは金枠が基調だが、連鎖中は連鎖色を混ぜて状態を示す
+        const edge = T.power > 0 ? T.edge : [255, 232, 150];
+        ctx.strokeStyle = rgbaOf(edge, 0.5 + pulse * 0.5);
+        ctx.lineWidth = 3 + T.power * 0.8;
+        if (T.power > 0) { ctx.shadowColor = rgbaOf(T.halo, 1); ctx.shadowBlur = 10 + T.power * 8; }
         roundRectPath(ctx, px + 3, py + 3, sz - 6, sz - 6, sz * 0.1);
         ctx.stroke();
+        ctx.shadowBlur = 0;
       }
     }
   }
@@ -1035,9 +1086,10 @@ function render() {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       // 尾（左側に減衰するグラデ）
+      const T = comboTier();
       const tail = ctx.createLinearGradient(tx - 90, 0, tx, 0);
-      tail.addColorStop(0, "rgba(90,190,255,0)");
-      tail.addColorStop(1, "rgba(120,210,255,0.22)");
+      tail.addColorStop(0, rgbaOf(T.halo, 0));
+      tail.addColorStop(1, rgbaOf(T.halo, 0.22 + T.power * 0.06));
       ctx.fillStyle = tail;
       ctx.fillRect(tx - 90, 0, 90, ROWS * CELL);
       // コアライン
@@ -1052,6 +1104,30 @@ function render() {
       ctx.fillRect(tx - 1, 0, 2, ROWS * CELL);
       ctx.restore();
     }
+  }
+
+  // 連鎖中は盤面の縁が連鎖色に脈動する（COMBO 表示を見なくても気づけるように）
+  if (combo >= 1 && running && !gameOver) {
+    const T = comboTier();
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / T.rate);
+    const a = (0.16 + pulse * 0.26) * Math.min(1, 0.4 + T.power * 0.4);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const bw = 26 + T.power * 8;
+    const bands = [
+      [0, 0, canvas.width, bw, 0, 0, 0, bw],
+      [0, canvas.height - bw, canvas.width, bw, 0, canvas.height, 0, canvas.height - bw],
+      [0, 0, bw, canvas.height, 0, 0, bw, 0],
+      [canvas.width - bw, 0, bw, canvas.height, canvas.width, 0, canvas.width - bw, 0],
+    ];
+    for (const [x, y, w, h, gx0, gy0, gx1, gy1] of bands) {
+      const g = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+      g.addColorStop(0, rgbaOf(T.halo, a));
+      g.addColorStop(1, rgbaOf(T.halo, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+    }
+    ctx.restore();
   }
 
   // パーティクル等
@@ -1589,6 +1665,8 @@ window.LUMINA = {
   pieceY() { return current ? current.y : null; },
   pieceCells() { return current ? current.cells : null; },
   addScore(v) { score += v; checkLevelUp(); updateHud(); },
+  setCombo(v) { combo = v; updateHud(); },
+  pause(v) { paused = !!v; },
   endNow() { endGame(); },
   setBoard(grid) {
     board = grid.map((row) => row.slice());
