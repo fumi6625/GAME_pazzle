@@ -857,7 +857,7 @@ function advanceTimeline() {
     sweepCleared += cleared.length;
 
     // このスイープに適用される倍率（resolveSweep と一致させる）
-    const pendingMult = Math.min(16, Math.pow(2, combo));
+    const pendingMult = multOf(combo);
     let colBase = 0;
     let colBig = 0;
     for (const cell of cleared) {
@@ -913,14 +913,14 @@ function resolveSweep() {
     if (combo > maxCombo) maxCombo = combo;
     squaresCleared += sweepCleared / 4;
 
-    const mult = Math.min(16, Math.pow(2, combo - 1)); // x1,x2,x4,x8,x16
+    const mult = multOf(combo - 1);   // combo++ 済みなので1つ戻して数える
     let pts = Math.round(sweepBase * mult * levelMult());
     if (sweepCleared >= 8) pts += 100;
     score += pts;
 
     // 連鎖はバナーと音で伝える。画面全体を揺らすと目が疲れるので控える。
     if (combo >= 2) {
-      Effects.banner("COMBO x" + combo, rgbaOf(HL_CHAIN, 1));
+      comboPop = 1;                 // 盤面左下の COMBO 表示を一瞬大きくする
       Effects.screenFlash(0.10);
       GameAudio.playCombo(combo);
     }
@@ -1136,6 +1136,12 @@ function endGame() {
 const HL_IDLE = [255, 255, 255];    // 連鎖なし
 const HL_CHAIN = [255, 206, 92];    // 連鎖中（琥珀）
 const chaining = () => combo >= 1;
+// 得点倍率。参考動画と同じく x1 → x2 → x4 → x8 → x16 で頭打ち。
+// 引数は「このスイープに入る前の連鎖数」。いま流れている1周が消せば
+// combo は 1 増えるので、実際に掛かる倍率は multOf(連鎖数) になる。
+const multOf = (c) => Math.min(16, Math.pow(2, Math.max(0, c)));
+const comboMult = () => multOf(combo);
+let comboPop = 0;          // COMBO 表示の一瞬の拡大（0..1 で減衰）
 const hlColor = () => (chaining() ? HL_CHAIN : HL_IDLE);
 // 脈動はごく穏やかに（周期 620ms・振幅小）。目立たせるのは色の違いで足りる。
 const hlPulse = () => 0.5 + 0.5 * Math.sin(performance.now() / 620);
@@ -1330,6 +1336,39 @@ function render() {
     }
   }
 
+  // COMBO 表示（参考動画と同じく盤面の左下に大きく常時出す）。
+  // 連鎖が続いている限り数字が伸びていくので、途切れさせたくない気持ちが働く。
+  if (running && !gameOver && combo > 0) {
+    const H = ROWS * CELL;
+    const pop = 1 + comboPop * 0.35;
+    // コマの上に重なっても読めるよう、下端に薄い暗幕を敷く
+    const sh = ctx.createLinearGradient(0, H - 74, 0, H);
+    sh.addColorStop(0, "rgba(0,0,0,0)");
+    sh.addColorStop(1, "rgba(0,0,0,0.55)");
+    ctx.fillStyle = sh;
+    ctx.fillRect(0, H - 74, 300, 74);
+    ctx.save();
+    ctx.translate(14, H - 20);
+    ctx.scale(pop, pop);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.shadowColor = rgbaOf(HL_CHAIN, 0.85);
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = rgbaOf(HL_CHAIN, 0.96);
+    ctx.font = '700 30px "Rajdhani", system-ui, sans-serif';
+    const n = String(combo);
+    ctx.fillText(n, 0, 0);
+    const w = ctx.measureText(n).width;
+    ctx.font = '600 15px "Rajdhani", system-ui, sans-serif';
+    ctx.fillText("COMBO", w + 8, -1);
+    // 次のスイープで適用される倍率
+    ctx.shadowBlur = 8;
+    ctx.font = '600 13px "Rajdhani", system-ui, sans-serif';
+    ctx.fillStyle = rgbaOf(HL_CHAIN, 0.72);
+    ctx.fillText("SCORE x" + comboMult(), 1, -30);
+    ctx.restore();
+  }
+
   // パーティクル等
   Effects.drawForeground(ctx, canvas.width, canvas.height);
 
@@ -1493,6 +1532,7 @@ function loop(now) {
   }
 
   updateFall(dt);
+  comboPop = Math.max(0, comboPop - dt * 3.2);
   Effects.update(dt);
   render();
   requestAnimationFrame(loop);
@@ -2048,6 +2088,7 @@ window.LUMINA = {
   },
   get paused() { return paused; },
   get maxCombo() { return maxCombo; },
+  comboMult() { return comboMult(); },
   nextQueue() { return nextQueue.map((c) => c.map((r) => r.slice())); },
   fallMax() {
     let m = 0;
