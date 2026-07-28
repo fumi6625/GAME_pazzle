@@ -2,7 +2,10 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#04050a" />
   <title>LUMINA ARISE — ルミナス風パズル</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -75,12 +78,28 @@
             </div>
           </div>
 
+          <!-- タッチ操作（スマホ・タブレットでのみ表示。CSS の pointer:coarse で切替）-->
+          <div id="touchpad" class="touchpad">
+            <button class="tbtn" data-act="rotateCCW" aria-label="左回転">↺</button>
+            <button class="tbtn" data-act="left" aria-label="左へ移動">◀</button>
+            <button class="tbtn" data-act="right" aria-label="右へ移動">▶</button>
+            <button class="tbtn" data-act="rotateCW" aria-label="右回転">↻</button>
+            <button class="tbtn tbtn-drop" data-act="softDrop" aria-label="ソフトドロップ">▼</button>
+            <button class="tbtn tbtn-drop" data-act="hardDrop" aria-label="即落下">⤓</button>
+            <button class="tbtn tbtn-a" data-act="burst">BURST A</button>
+            <button class="tbtn tbtn-b" data-act="slow">BURST B</button>
+            <button class="tbtn tbtn-sm" data-act="pause">II</button>
+            <button class="tbtn tbtn-sm" data-act="mute">♪</button>
+          </div>
+
           <footer class="foot">
-            同色を <strong>2×2</strong> にそろえ、流れる <strong>タイムライン</strong> で消去。
+            <span class="foot-touch">盤面を<strong>左右にドラッグ</strong>で移動、<strong>タップ</strong>で右回転、
+            <strong>上スワイプ</strong>で即落下、<strong>下スワイプ</strong>でソフトドロップ。</span>
+            <span class="foot-rules">同色を <strong>2×2</strong> にそろえ、流れる <strong>タイムライン</strong> で消去。
             <strong>3×3 / 4×4</strong> に広げると <strong>豪華コマ</strong>に変化して単価アップ。
             <strong>BURST B</strong> でタイムラインを遅くして大きな正方形を狙える。
             連続で <strong>COMBO</strong>、レベルが上がるほど高得点＆高速化。
-            ゲージ満タンで <strong>BURST A</strong>（最下段4行を薙ぎ払う）。
+            ゲージ満タンで <strong>BURST A</strong>（最下段4行を薙ぎ払う）。</span>
           </footer>
         </main>
 

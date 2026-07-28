@@ -1197,7 +1197,7 @@ function loop(now) {
 
     // 重力
     gravityTimer += dt * 1000;
-    const gi = (softDrop || padSoftDrop) ? SOFT_DROP_INTERVAL : gravityInterval();
+    const gi = (softDrop || padSoftDrop || touchSoftDrop) ? SOFT_DROP_INTERVAL : gravityInterval();
     if (gravityTimer >= gi) { gravityTimer = 0; if (current) stepDown(); }
 
     // タイムライン（音楽ビートで進行: 1列 = 8分音符）
@@ -1544,6 +1544,118 @@ window.addEventListener("gamepaddisconnected", () => {
   updatePadStatus(null);
   renderPadCfg();
 });
+
+// ===== タッチ操作 =====
+// 盤面のジェスチャ:
+//   左右ドラッグ … 指の移動量をセル幅で割って移動（追従するので狙った列に置きやすい）
+//   タップ       … 右回転
+//   上スワイプ   … 即落下 / 下スワイプ … ソフトドロップ
+//   2本指タップ  … 左回転
+// 加えて画面下のボタンでも同じ操作ができる（細かい位置合わせ用）。
+const TAP_MS = 260;          // これより短く、動きが小さければタップ扱い
+const TAP_SLOP = 14;         // タップと見なす移動量(px)
+const SWIPE_Y = 42;          // 縦スワイプと見なす移動量(px)
+
+let touchId = null;
+let tx0 = 0, ty0 = 0, tt0 = 0, tCarry = 0, tMoved = false, tTwo = false;
+let touchSoftDrop = false;
+
+function cellPx() {
+  const r = canvas.getBoundingClientRect();
+  return r.width / COLS;    // 表示上の1セル幅（盤面は縮小表示されることがある）
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return;
+  if (!running || gameOver || padCfgOpen) return;
+  if (touchId !== null) { tTwo = true; return; }   // 2本目 = 左回転の合図
+  touchId = e.pointerId;
+  tx0 = e.clientX; ty0 = e.clientY; tt0 = performance.now();
+  tCarry = 0; tMoved = false; tTwo = false;
+  // 指が盤面外へ出ても追従させる。合成イベント等で捕捉できない場合もあるので握り潰す。
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 捕捉できなくても動く */ }
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener("pointermove", (e) => {
+  if (e.pointerId !== touchId) return;
+  const dx = e.clientX - tx0;
+  const dy = e.clientY - ty0;
+  if (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP) tMoved = true;
+  // 横方向はセル単位で追従させる
+  const w = cellPx();
+  const want = Math.trunc((dx - tCarry) / w);
+  if (want !== 0) {
+    for (let i = 0; i < Math.abs(want); i++) move(Math.sign(want));
+    tCarry += want * w;
+  }
+  e.preventDefault();
+}, { passive: false });
+
+function endTouch(e) {
+  if (e.pointerId !== touchId) return;
+  const dt = performance.now() - tt0;
+  const dy = e.clientY - ty0;
+  const dx = e.clientX - tx0;
+  if (tTwo) {
+    rotate(-1);                                   // 2本指 = 左回転
+  } else if (!tMoved && dt < TAP_MS) {
+    rotate(1);                                    // タップ = 右回転
+  } else if (dy < -SWIPE_Y && Math.abs(dy) > Math.abs(dx)) {
+    hardDrop();                                   // 上スワイプ = 即落下
+  } else if (dy > SWIPE_Y && Math.abs(dy) > Math.abs(dx)) {
+    softDrop = true;                              // 下スワイプ = ひと押しぶん落とす
+    setTimeout(() => { softDrop = false; }, 220);
+  }
+  touchId = null; tTwo = false;
+  e.preventDefault();
+}
+canvas.addEventListener("pointerup", endTouch, { passive: false });
+canvas.addEventListener("pointercancel", (e) => {
+  if (e.pointerId === touchId) { touchId = null; tTwo = false; }
+});
+
+// ===== 画面下のタッチボタン =====
+{
+  const pad = document.getElementById("touchpad");
+  let repeatTimer = null, repeatDelay = null;
+  const fire = {
+    left: () => move(-1),
+    right: () => move(1),
+    rotateCW: () => rotate(1),
+    rotateCCW: () => rotate(-1),
+    hardDrop: () => hardDrop(),
+    burst: () => triggerBurst(),
+    slow: () => triggerSlow(),
+    pause: () => { if (!gameOver) paused = !paused; },
+    mute: () => GameAudio.toggleMute(),
+  };
+  const stopRepeat = () => {
+    clearTimeout(repeatDelay); clearInterval(repeatTimer);
+    repeatDelay = repeatTimer = null;
+  };
+
+  if (pad) pad.addEventListener("pointerdown", (e) => {
+    const btn = e.target.closest(".tbtn");
+    if (!btn) return;
+    e.preventDefault();
+    const act = btn.getAttribute("data-act");
+    if (!running) { startGame(); return; }
+    if (act === "softDrop") { touchSoftDrop = true; return; }
+    if (fire[act]) fire[act]();
+    // 左右は押しっぱなしでリピート（キーボードの DAS/ARR と同じ間隔）
+    if (act === "left" || act === "right") {
+      stopRepeat();
+      repeatDelay = setTimeout(() => {
+        repeatTimer = setInterval(fire[act], PAD_ARR);
+      }, PAD_DAS);
+    }
+  }, { passive: false });
+
+  const release = () => { stopRepeat(); touchSoftDrop = false; };
+  document.addEventListener("pointerup", release);
+  document.addEventListener("pointercancel", release);
+}
 
 // ===== 入力 =====
 document.addEventListener("keydown", (e) => {
