@@ -372,6 +372,11 @@ body {
   margin-top: 18px;
   width: min(390px, 78vw);
   text-align: left;
+  /* ここだけが縮む。ボタンや見出しは押し出さない。 */
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .rank-title {
   font-size: 9px;
@@ -385,8 +390,11 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
   max-height: 210px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .rank-row {
   display: grid;
@@ -670,7 +678,13 @@ kbd {
 .overlay.hidden { display: none; }
 /* 中身は必ずオーバーレイの中に収める。収まらないぶんはここでスクロールさせ、
    盤面の枠からはみ出して他の要素と重なるのを防ぐ。 */
+/* 縦のフレックスにして、縮んでいいのはランキングだけにする。
+   こうしないと画面が低いときにボタンがスクロール外へ押し出され、
+   「ホームへ戻れない」ことになる。 */
 .overlay-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   line-height: 1.6;
   max-width: 100%;
@@ -680,6 +694,7 @@ kbd {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
+.overlay-inner > * { flex: 0 0 auto; }
 
 .overlay-kicker {
   font-size: 9px;

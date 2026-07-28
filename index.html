@@ -86,15 +86,17 @@
                 <p class="overlay-title over">GAME OVER</p>
                 <p id="over-score" class="overlay-sub">SCORE: 0</p>
                 <p id="over-rank-note" class="rank-note"></p>
-                <div class="rank-panel">
-                  <p class="rank-title">BEST 10</p>
-                  <ol id="over-rank" class="rank-list"></ol>
-                </div>
+                <!-- ボタンはランキングより先に置く。ランキングが10件そろうと
+                     内容が枠より高くなり、下に置くとスクロールしないと見えないため。 -->
                 <div class="mode-btns">
                   <button id="retry-btn" class="start-btn">RETRY</button>
                   <button id="home-btn" class="start-btn ghost">ホームへ</button>
                 </div>
                 <p class="overlay-hint">R キーで再挑戦 / H キーでホーム</p>
+                <div class="rank-panel">
+                  <p class="rank-title">BEST 10</p>
+                  <ol id="over-rank" class="rank-list"></ol>
+                </div>
               </div>
             </div>
           </div>
@@ -119,7 +121,8 @@
 
           <footer class="foot">
             <span class="foot-touch">盤面を<strong>左右にドラッグ</strong>で移動、<strong>タップ</strong>で右回転、
-            <strong>上スワイプ</strong>で即落下、<strong>下スワイプ</strong>でソフトドロップ。</span>
+            <strong>上スワイプ</strong>で即落下、<strong>下スワイプ</strong>でソフトドロップ。
+            着地後も<strong>動かす／回すたびに固定が延びます</strong>（15回まで）。</span>
             <span class="foot-rules">同色を <strong>2×2</strong> にそろえ、流れる <strong>タイムライン</strong> で消去。
             <strong>3×3 / 4×4</strong> に広げると <strong>豪華コマ</strong>に変化して単価アップ。
             <strong>BURST B</strong> でタイムラインを遅くして大きな正方形を狙える。

@@ -33,6 +33,14 @@ const COLORS = {
 const GRAVITY_BEATS = 1.5;      // レベル1: 1行落ちるのに1.5拍（135BPM で約667ms）
 const MIN_GRAVITY_BEATS = 0.5;  // 下限: 1行 = 8分音符
 const SOFT_DROP_INTERVAL = 45;
+
+// ===== 接地してから固定されるまでの猶予（ロックディレイ）=====
+// テトリスと同じく、着地しても少しのあいだは動かせる。動かすか回すたびに
+// 猶予が리セットされるので、回し続けて固定を先延ばしにできる。
+// ただし無限に粘れると別のゲームになってしまうので、回数に上限を置く
+// （テトリスのガイドラインと同じ 15 回）。より下の段へ落ちたら上限は戻る。
+const LOCK_DELAY = 520;         // ms: 接地してから固定されるまで
+const LOCK_RESET_MAX = 15;      // 猶予をリセットできる回数
 const BURST_MAX = 72;           // 消したセル数でゲージ満タン（条件を厳しく）
 
 // ===== レベル =====
@@ -76,6 +84,9 @@ let timelineCol;
 let timelineBeat;
 
 let gravityTimer, lastTime;
+let lockTimer = 0;              // 接地してから経った時間(ms)
+let lockResets = 0;             // 猶予をリセットした回数
+let lockLowest = -99;           // このコマが到達した最も下の段
 
 // ===== Canvas =====
 const canvas = document.getElementById("board");
@@ -691,6 +702,7 @@ function init() {
 function spawnPiece() {
   const startX = Math.floor(COLS / 2) - 1;
   current = { x: startX, y: -2, cells: nextQueue.shift() };
+  lockTimer = 0; lockResets = 0; lockLowest = -99;
   while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   drawNext();
   if (board[0][startX] !== EMPTY || board[0][startX + 1] !== EMPTY) {
@@ -712,11 +724,21 @@ function collides(x, y, cells) {
 }
 
 // ===== 操作 =====
+// 接地中に動かす/回すと固定までの猶予が戻る。上限に達したらもう戻らない。
+function touchLockDelay() {
+  if (!current) return;
+  if (!collides(current.x, current.y + 1, current.cells)) return;   // 浮いている
+  if (lockResets >= LOCK_RESET_MAX) return;
+  lockResets++;
+  lockTimer = 0;
+}
+
 function move(dx) {
   if (!current || gameOver || paused) return;
   if (!collides(current.x + dx, current.y, current.cells)) {
     current.x += dx;
     GameAudio.playMove(dx);
+    touchLockDelay();
     if (tutorialMode) tutSeen.moved = true;
   }
 }
@@ -730,6 +752,7 @@ function rotate(dir = 1) {
   if (!collides(current.x, current.y, rotated)) {
     current.cells = rotated;
     GameAudio.playRotate(dir);
+    touchLockDelay();
     if (tutorialMode) tutSeen.rotated = true;
     // 回転は「音を回す」動作: ピース中心にリングを出す（方向で色を変える）
     const { cx, cy } = cellCenter(current.x + 0.5, Math.max(0, current.y) + 0.5);
@@ -740,6 +763,7 @@ function hardDrop() {
   if (!current || gameOver || paused) return;
   const from = current.y;
   while (!collides(current.x, current.y + 1, current.cells)) current.y++;
+  lockTimer = 0;
   if (current.y > from) {
     GameAudio.playDrop();
     // 落下の軌跡（残像トレイル）
@@ -749,8 +773,13 @@ function hardDrop() {
   lockPiece();
 }
 function stepDown() {
-  if (!collides(current.x, current.y + 1, current.cells)) current.y++;
-  else lockPiece();
+  if (collides(current.x, current.y + 1, current.cells)) return false;
+  current.y++;
+  // より下の段へ進めたら、猶予のリセット回数を戻す。
+  // これがないと、下へ落ちながらでも回した回数が累積して早々に固定されてしまう。
+  if (current.y > lockLowest) { lockLowest = current.y; lockResets = 0; }
+  lockTimer = 0;
+  return true;
 }
 
 // ===== 固定 =====
@@ -1309,11 +1338,29 @@ function render() {
         }
       ctx.restore();
     }
+    // 接地中は、固定までの残り時間が分かるように白く明滅させる。
+    // 残りが少ないほど速く点滅するので「そろそろ固まる」が体で分かる。
+    const lockT = lockTimer > 0 ? Math.min(1, lockTimer / LOCK_DELAY) : 0;
     for (let r = 0; r < 2; r++)
       for (let c = 0; c < 2; c++) {
         const by = current.y + r;
         if (by >= 0) drawCell(ctx, current.x + c, by, current.cells[r][c], CELL);
       }
+    if (lockT > 0) {
+      const blink = 0.5 + 0.5 * Math.sin(performance.now() / (60 + (1 - lockT) * 150));
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.12 + lockT * 0.30 * blink;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(current.x * CELL, Math.max(0, current.y) * CELL,
+                   2 * CELL, (current.y + 2 - Math.max(0, current.y)) * CELL);
+      ctx.restore();
+      // 猶予の残りを細いバーで示す（リセット上限に達したら赤に変える）
+      const w = 2 * CELL * (1 - lockT);
+      ctx.fillStyle = lockResets >= LOCK_RESET_MAX
+        ? "rgba(255,90,90,0.9)" : "rgba(255,255,255,0.75)";
+      ctx.fillRect(current.x * CELL, (current.y + 2) * CELL - 3, w, 3);
+    }
   }
 
   // タイムライン（音楽同期 + 尾を引く光）
@@ -1542,9 +1589,20 @@ function loop(now) {
     elapsedMs = now - startTimeMs;
 
     // 重力
-    gravityTimer += dt * 1000;
-    const gi = (softDrop || padSoftDrop || touchSoftDrop) ? SOFT_DROP_INTERVAL : gravityInterval();
-    if (gravityTimer >= gi) { gravityTimer = 0; if (current) stepDown(); }
+    // 重力と接地。接地している間は落とさず、猶予を数えて時間切れで固定する。
+    if (current) {
+      if (collides(current.x, current.y + 1, current.cells)) {
+        gravityTimer = 0;
+        lockTimer += dt * 1000;
+        if (lockTimer >= LOCK_DELAY) { lockTimer = 0; lockPiece(); }
+      } else {
+        lockTimer = 0;
+        gravityTimer += dt * 1000;
+        const gi = (softDrop || padSoftDrop || touchSoftDrop)
+          ? SOFT_DROP_INTERVAL : gravityInterval();
+        if (gravityTimer >= gi) { gravityTimer = 0; stepDown(); }
+      }
+    }
 
     // タイムライン（音楽ビートで進行: 1列 = 8分音符）
     const beatsPerCol = 0.5;
@@ -2126,6 +2184,12 @@ window.LUMINA = {
   },
   get paused() { return paused; },
   get maxCombo() { return maxCombo; },
+  get lockTimer() { return lockTimer; },
+  get lockResets() { return lockResets; },
+  lockConst() { return { delay: LOCK_DELAY, max: LOCK_RESET_MAX }; },
+  stepDown() { return current ? stepDown() : false; },
+  rotate(d) { rotate(d); },
+  move(d) { move(d); },
   get quality() { return quality; },
   comboMult() { return comboMult(); },
   nextQueue() { return nextQueue.map((c) => c.map((r) => r.slice())); },
@@ -2194,6 +2258,8 @@ const TUT_STEPS = [
   {
     title: "動かす・回す",
     body: "落ちてくるのは 2色 4マスのコマ。左右で列を選び、回転で 4マスの色の並びを変えます。"
+        + "着地しても少しのあいだは動かせて、動かすか回すたびに固定までの猶予が延びます"
+        + "（延ばせるのは15回まで）。急いで置かず、置き場所を作り直せます。"
         + "（スマホは盤面の下をドラッグ＝移動、タップ＝右回転）",
     goal: "左右に動かして、1回まわしてみましょう",
     freeze: true,
