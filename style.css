@@ -724,6 +724,46 @@ kbd {
 }
 .start-btn:active { transform: translateY(1px); }
 
+/* ===== デザイン切り替え / モード選択 ===== */
+.picker { margin-top: 22px; }
+.picker-label {
+  display: block;
+  font-family: var(--ui);
+  font-size: 9px;
+  letter-spacing: 0.36em;
+  color: var(--dim-2);
+}
+.picker-row { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
+.picker-btn {
+  padding: 8px 20px;
+  font-family: var(--ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+.picker-btn:hover { color: var(--text); border-color: rgba(92, 228, 255, 0.5); }
+.picker-btn.on {
+  color: #04050a;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.picker-desc {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--dim-2);
+}
+
+.mode-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.start-btn.ghost { border-color: var(--line); color: var(--muted); }
+.start-btn.ghost:hover { color: #04050a; background: var(--muted); box-shadow: none; }
+
 /* ===== タッチ操作 ===== */
 /* 既定は非表示。粗いポインタ（スマホ・タブレット）でのみ出す。 */
 .touchpad, .toptouch { display: none; }
@@ -762,8 +802,16 @@ kbd {
 }
 .tbtn:active { background: rgba(92, 228, 255, 0.28); transform: scale(0.96); }
 
-/* ドロップは補助（スワイプでも出せる）ので小さめ */
-.tbtn-drop { min-height: 42px; font-size: 20px; color: var(--accent); }
+/* 即落下は回転の上に横いっぱいで置く */
+.tbtn-hard {
+  grid-column: 1 / -1;
+  min-height: 62px;
+  font-size: 30px;
+  color: var(--accent);
+  border-color: rgba(92, 228, 255, 0.5);
+  background: rgba(92, 228, 255, 0.10);
+}
+.tbtn-hard:active { background: rgba(92, 228, 255, 0.30); }
 
 /* BURST は回転と色で明確に分ける */
 .tbtn-a {
@@ -781,10 +829,10 @@ kbd {
 .tbtn-a:active { background: rgba(255, 92, 200, 0.34); }
 .tbtn-b:active { background: rgba(127, 233, 255, 0.34); }
 
-/* 回転は一番よく使うので最大・画面最下段 */
+/* 回転は一番よく使うので最大 */
 .tbtn-rot {
-  min-height: 84px;
-  font-size: 40px;
+  min-height: 104px;
+  font-size: 48px;
   color: #ffe27a;
   border-color: rgba(255, 226, 122, 0.5);
   background: rgba(255, 226, 122, 0.09);
@@ -797,6 +845,59 @@ kbd {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.04);
 }
+
+/* ===== チュートリアル ===== */
+.tut.hidden { display: none; }
+.tut {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid rgba(92, 228, 255, 0.35);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(6, 14, 26, 0.72);
+}
+.tut-head { display: flex; align-items: baseline; gap: 12px; }
+.tut-step {
+  font-family: var(--ui);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+.tut-title {
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+.tut-quit {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-family: var(--ui);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--dim-2);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.tut-quit:hover { color: var(--text); border-color: var(--muted); }
+.tut-body {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.tut-goal {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #ffe27a;
+}
+.tut-goal.done { color: #6ef2b0; }
 
 /* ===== ドラッグ領域 ===== */
 /* 盤面の下に置く親指用のスペース。ここを触っても指がコマにかからない。
@@ -886,10 +987,10 @@ kbd {
   .burst-wrap { gap: 5px; }
   .touchpad { gap: 7px; margin-top: 6px; }
   .tbtn { min-height: 44px; font-size: 18px; }
-  .tbtn-drop { min-height: 40px; }
+  /* 上から 即落下 → 回転 → BURST。回転を最大に取る（.tbtn の指定を上書き） */
+  .tbtn-hard { min-height: 72px; font-size: 34px; }
+  .tbtn-rot { min-height: 116px; font-size: 52px; }
   .tbtn-a, .tbtn-b { min-height: 52px; font-size: 12px; }
-  /* 一番よく使う回転は最下段に大きく確保する（.tbtn の指定を上書き） */
-  .tbtn-rot { min-height: 92px; font-size: 42px; }
   .tbtn-sm { min-height: 32px; font-size: 12px; }
   .overlay-title { font-size: 24px; }
   .cfg-inner { padding: 16px; }
@@ -941,6 +1042,24 @@ kbd {
   .level-next { font-size: 8px; }
   .next-inline { gap: 6px; }
 
+  /* 横持ちは縦が乏しいので、チュートリアルの説明はドラッグ領域に重ねる。
+     クリックは下のドラッグ領域へ通すので、読みながら操作できる。 */
+  .main { position: relative; }
+  .tut {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    margin: 0;
+    padding: 7px 9px;
+    background: rgba(4, 10, 20, 0.82);
+    pointer-events: none;
+    z-index: 12;
+  }
+  .tut-quit { pointer-events: auto; }
+  .tut-title { font-size: 11px; }
+  .tut-body { margin-top: 3px; font-size: 10px; line-height: 1.45; }
+  .tut-goal { margin-top: 4px; font-size: 10px; }
+  body.tut-on .dragzone-hint { display: none; }
+
   /* 親指ドラッグ領域: 盤面より下の左側スペースを全部使う */
   .dragzone {
     display: flex;
@@ -964,8 +1083,8 @@ kbd {
   .stat-grid .stat-value { font-size: 12px; }
 
   .tbtn { min-height: 34px; font-size: 15px; }
-  .tbtn-drop { min-height: 30px; font-size: 16px; }
+  .tbtn-hard { min-height: 44px; font-size: 22px; }
+  .tbtn-rot { min-height: 74px; font-size: 34px; }
   .tbtn-a, .tbtn-b { min-height: 34px; font-size: 9px; letter-spacing: 0.1em; }
-  .tbtn-rot { min-height: 58px; font-size: 28px; }
   .tbtn-sm { min-height: 26px; font-size: 11px; }
 }

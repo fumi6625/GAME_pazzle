@@ -26,7 +26,12 @@ const COLORS = {
   [COLOR_B]: { deep: "#2b0620", base: "#a01463", light: "#ff5cc8", core: "#ffe0f4", glow: "#ff5cc8" },
 };
 
-const GRAVITY_INTERVAL = 620;   // ms: ピース落下（レベル1）
+// 落下速度は ms 固定ではなく「拍」で持つ。
+// 参考動画（ルミネス リマスター）のタイムラインは 16列 = 3.94秒 = ちょうど2小節で、
+// 盤面の進行が完全に曲に乗っている。落下も同じ考え方で拍に紐づけておくと、
+// 曲の BPM が変わっても「音楽的な落ち方」が崩れない。
+const GRAVITY_BEATS = 1.5;      // レベル1: 1行落ちるのに1.5拍（135BPM で約667ms）
+const MIN_GRAVITY_BEATS = 0.5;  // 下限: 1行 = 8分音符
 const SOFT_DROP_INTERVAL = 45;
 const BURST_MAX = 72;           // 消したセル数でゲージ満タン（条件を厳しく）
 
@@ -35,7 +40,6 @@ const LEVEL_BASE = 2000;        // Lv2 到達に必要な点
 const LEVEL_STEP = 1600;        // 1レベル上がるごとの必要点の増分
 const LEVEL_MULT = 0.2;         // レベルごとの得点係数の増加（Lv1=x1.0, Lv5=x1.8）
 const LEVEL_SPEEDUP = 0.955;    // レベルごとの落下間隔（ほんの少しだけ速く）
-const MIN_GRAVITY = 190;        // 落下間隔の下限
 const MAX_LEVEL = 30;
 
 // ===== 豪華コマ（3x3 以上の同色正方形） =====
@@ -112,8 +116,14 @@ function colPan(x) { return (x / (COLS - 1)) * 1.6 - 0.8; }
 // 落下間隔がわずかに縮んで難度が上がる。
 function levelNeed(l) { return LEVEL_BASE + (l - 1) * LEVEL_STEP; }
 function levelMult() { return 1 + (level - 1) * LEVEL_MULT; }
+// 1行落ちるのに何拍かけるか → ms に直す。曲が止まっている間も破綻しないよう
+// secondsPerBeat が取れないときは 135BPM 相当にフォールバックする。
+function gravityBeats() {
+  return Math.max(MIN_GRAVITY_BEATS, GRAVITY_BEATS * Math.pow(LEVEL_SPEEDUP, level - 1));
+}
 function gravityInterval() {
-  return Math.max(MIN_GRAVITY, GRAVITY_INTERVAL * Math.pow(LEVEL_SPEEDUP, level - 1));
+  const spb = (typeof GameAudio !== "undefined" && GameAudio.secondsPerBeat) || 60 / 135;
+  return gravityBeats() * spb * 1000;
 }
 function checkLevelUp() {
   let rose = false;
@@ -233,6 +243,44 @@ function renderRanking(el, list, mark) {
 }
 
 // ===== ブロックスプライト（ガラス質の宝石ブロックを事前描画） =====
+// ===== テーマ（見た目の切り替え） =====
+// "arise"    … これまでの夜のメトロポリス。3Dシティ背景 + カット済みクリスタルのコマ
+// "remaster" … 参考動画（ルミネス リマスター）寄せ。平面2Dスキン + フラットな角コマ
+const THEME_KEY = "lumina.arise.theme.v1";
+const THEMES = [
+  { id: "arise", name: "ARISE", desc: "夜のメトロポリス／3D背景・宝石コマ" },
+  { id: "remaster", name: "REMASTER", desc: "平面2Dスキン／フラットなコマ・帯タイムライン" },
+];
+let themeId = "arise";
+function loadTheme() {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (THEMES.some((t) => t.id === v)) themeId = v;
+  } catch (e) { /* localStorage が使えない環境では既定のまま */ }
+}
+function isRemaster() { return themeId === "remaster"; }
+function applyTheme() {
+  Effects.setTheme(themeId);
+  document.body.setAttribute("data-theme", themeId);
+  // コマの見た目が変わるのでスプライトのキャッシュを捨てる
+  for (const k in spriteCache) delete spriteCache[k];
+  for (const k in bigSpriteCache) delete bigSpriteCache[k];
+  renderThemePicker();
+  if (nextPiece) drawNext();
+}
+function setTheme(id) {
+  if (!THEMES.some((t) => t.id === id) || id === themeId) return;
+  themeId = id;
+  try { localStorage.setItem(THEME_KEY, id); } catch (e) { /* 保存できなくても続行 */ }
+  applyTheme();
+}
+
+// REMASTER のコマ色は背景スキンから取る（スキンが変わるとコマの色も変わる）
+function skinPalette() {
+  const s = Effects.skin();
+  return { [COLOR_A]: s.a, [COLOR_B]: s.b, line: s.line, grid: s.grid, ink: s.ink };
+}
+
 const spriteCache = {};
 function roundRectPath(c, x, y, w, h, r) {
   c.beginPath();
@@ -269,11 +317,51 @@ function polyPath(c, pts) {
 }
 
 /*
+ * REMASTER のコマ。参考動画のコマは立体ではなく「角の四角 + 細い縁 + 斜めの面分割」。
+ * ベベルを付けず、色の差だけで2色を見分けさせるので、コマが小さくても潰れない。
+ */
+function flatSprite(color, size) {
+  const sk = Effects.skin();
+  const key = "f" + color + "_" + size + "_" + sk.id;
+  if (spriteCache[key]) return spriteCache[key];
+  const s = document.createElement("canvas");
+  s.width = s.height = size;
+  const c = s.getContext("2d");
+  const base = color === COLOR_A ? sk.a : sk.b;
+  const rgb = (v, a) => `rgba(${v[0]},${v[1]},${v[2]},${a})`;
+  const shade = (t) => [
+    Math.round(base[0] * t), Math.round(base[1] * t), Math.round(base[2] * t),
+  ];
+  const g = Math.max(1, Math.round(size * 0.055));   // セル間の目地
+
+  // 本体
+  c.fillStyle = rgb(shade(0.82), 1);
+  c.fillRect(g, g, size - g * 2, size - g * 2);
+  // 斜め分割: 左上の三角だけ明るくして、動画のコマの「斜めの面」を再現する
+  c.fillStyle = rgb(base, 1);
+  c.beginPath();
+  c.moveTo(g, g); c.lineTo(size - g, g); c.lineTo(g, size - g); c.closePath();
+  c.fill();
+  // 内側の細いハイライトと外側の縁
+  c.strokeStyle = rgb(shade(1.28), 0.55);
+  c.lineWidth = Math.max(1, size * 0.05);
+  c.strokeRect(g + c.lineWidth / 2, g + c.lineWidth / 2,
+               size - g * 2 - c.lineWidth, size - g * 2 - c.lineWidth);
+  c.strokeStyle = rgb(shade(0.4), 0.85);
+  c.lineWidth = 1;
+  c.strokeRect(g + 0.5, g + 0.5, size - g * 2 - 1, size - g * 2 - 1);
+
+  spriteCache[key] = s;
+  return s;
+}
+
+/*
  * カット済みクリスタルのブロック。
  * 面取り八角形の外周と内側テーブルの間に8枚のベベル面を張り、
  * 各面の向きと光源(左上)の内積で明暗を付けて立体を出す。
  */
 function blockSprite(color, size) {
+  if (isRemaster()) return flatSprite(color, size);
   const key = color + "_" + size;
   if (spriteCache[key]) return spriteCache[key];
   const s = document.createElement("canvas");
@@ -370,14 +458,66 @@ function blockSprite(color, size) {
 }
 
 /*
+ * REMASTER の豪華コマ。フラットな大きい1枚として描き、
+ * 二重の縁と隅のブラケットだけで「格の違い」を示す（立体表現は使わない）。
+ */
+function flatBigSprite(color, n) {
+  const sk = Effects.skin();
+  const size = n * CELL;
+  const s = document.createElement("canvas");
+  s.width = s.height = size;
+  const c = s.getContext("2d");
+  const base = color === COLOR_A ? sk.a : sk.b;
+  const rgb = (v, a) => `rgba(${v[0]},${v[1]},${v[2]},${a})`;
+  const shade = (t) => [base[0] * t, base[1] * t, base[2] * t].map((v) => Math.round(Math.min(255, v)));
+  const g = Math.max(2, Math.round(CELL * 0.055));
+
+  c.fillStyle = rgb(shade(0.82), 1);
+  c.fillRect(g, g, size - g * 2, size - g * 2);
+  c.fillStyle = rgb(base, 1);
+  c.beginPath();
+  c.moveTo(g, g); c.lineTo(size - g, g); c.lineTo(g, size - g); c.closePath();
+  c.fill();
+
+  // 二重縁（タイムライン色に合わせた明色）
+  c.strokeStyle = rgb(sk.line, 0.95);
+  c.lineWidth = Math.max(2, size * 0.016);
+  c.strokeRect(g + 2, g + 2, size - g * 2 - 4, size - g * 2 - 4);
+  c.strokeStyle = rgb(shade(0.35), 0.9);
+  c.lineWidth = 1;
+  c.strokeRect(g + 6, g + 6, size - g * 2 - 12, size - g * 2 - 12);
+
+  // 四隅のブラケット
+  const L = size * 0.14;
+  c.strokeStyle = rgb(sk.line, 0.85);
+  c.lineWidth = Math.max(2, size * 0.014);
+  for (const [sx, sy, dx, dy] of [
+    [g + 6, g + 6, 1, 1], [size - g - 6, g + 6, -1, 1],
+    [g + 6, size - g - 6, 1, -1], [size - g - 6, size - g - 6, -1, -1],
+  ]) {
+    c.beginPath();
+    c.moveTo(sx, sy + dy * L); c.lineTo(sx, sy); c.lineTo(sx + dx * L, sy);
+    c.stroke();
+  }
+  // 大きさの表示（3x3 / 4x4 が一目で分かるように）
+  c.fillStyle = rgb(sk.line, 0.5);
+  c.font = `600 ${Math.round(size * 0.16)}px "Rajdhani", system-ui, sans-serif`;
+  c.textAlign = "center";
+  c.textBaseline = "middle";
+  c.fillText(n + "×" + n, size / 2, size / 2);
+  return s;
+}
+
+/*
  * 豪華コマ（3x3 以上の同色正方形）を1個の大きな宝石として描く。
  * ベースは同じカット済みクリスタルを n セル分の大きさで描き、
  * その上に金の二重縁・四隅の飾り・中央のきらめきを重ねて「格の違い」を出す。
  */
 const bigSpriteCache = {};
 function bigBlockSprite(color, n) {
-  const key = color + "_" + n;
+  const key = color + "_" + n + (isRemaster() ? "_r" + Effects.skin().id : "");
   if (bigSpriteCache[key]) return bigSpriteCache[key];
+  if (isRemaster()) return (bigSpriteCache[key] = flatBigSprite(color, n));
   const size = n * CELL;
   const s = document.createElement("canvas");
   s.width = s.height = size;
@@ -530,6 +670,7 @@ function move(dx) {
   if (!collides(current.x + dx, current.y, current.cells)) {
     current.x += dx;
     GameAudio.playMove(dx);
+    if (tutorialMode) tutSeen.moved = true;
   }
 }
 // dir: 1 = 右回転(時計回り) / -1 = 左回転(反時計回り)
@@ -542,6 +683,7 @@ function rotate(dir = 1) {
   if (!collides(current.x, current.y, rotated)) {
     current.cells = rotated;
     GameAudio.playRotate(dir);
+    if (tutorialMode) tutSeen.rotated = true;
     // 回転は「音を回す」動作: ピース中心にリングを出す（方向で色を変える）
     const { cx, cy } = cellCenter(current.x + 0.5, Math.max(0, current.y) + 0.5);
     Effects.ring(cx, cy, dir >= 0 ? "rgba(150,230,255,1)" : "rgba(255,190,120,1)", CELL * 1.6);
@@ -787,6 +929,7 @@ function onBurstReady() {
 // ===== BURST-B: タイムライン減速（大きな正方形を組む時間を稼ぐ） =====
 function triggerSlow() {
   if (!burstReady || gameOver || paused) return;
+  if (tutorialMode) tutSeen.burstUsed = true;
   burstReady = false;
   burstGauge = 0;
   Effects.setBurstReady(false);
@@ -806,6 +949,7 @@ function triggerSlow() {
 // ===== BURST-A: 最下段を薙ぎ払う =====
 function triggerBurst() {
   if (!burstReady || gameOver || paused) return;
+  if (tutorialMode) tutSeen.burstUsed = true;
   burstReady = false;
   burstGauge = 0;
   Effects.setBurstReady(false);
@@ -903,6 +1047,8 @@ function updateHud() {
 // ===== ゲームオーバー =====
 function endGame() {
   if (gameOver) return;
+  // チュートリアル中は詰まっても終了させず、そのステップをやり直す
+  if (tutorialMode) { tutGo(tutStep); return; }
   gameOver = true;
   current = null;
   GameAudio.playGameOver();
@@ -965,13 +1111,21 @@ function drawCell(c, x, y, color, size, opts = {}) {
     c.drawImage(blockSprite(color, size), px, py);
     c.restore();
 
-    // 面取り八角形に沿った枠。色だけが連鎖の有無を示す。
+    // 消去待ちの枠。色だけが連鎖の有無を示す。
     c.save();
     c.translate(px, py);
-    polyPath(c, facetPoints(size, Math.max(1.5, size * 0.045) + 1, size * 0.2, 1));
-    c.strokeStyle = rgbaOf(col, 0.6 + pulse * 0.3);
-    c.lineWidth = 2;
-    c.stroke();
+    if (isRemaster()) {
+      // フラットなコマなので枠も角の四角にそろえる
+      const g = Math.max(1, Math.round(size * 0.055));
+      c.strokeStyle = rgbaOf(col, 0.7 + pulse * 0.3);
+      c.lineWidth = 2;
+      c.strokeRect(g + 1, g + 1, size - g * 2 - 2, size - g * 2 - 2);
+    } else {
+      polyPath(c, facetPoints(size, Math.max(1.5, size * 0.045) + 1, size * 0.2, 1));
+      c.strokeStyle = rgbaOf(col, 0.6 + pulse * 0.3);
+      c.lineWidth = 2;
+      c.stroke();
+    }
     c.restore();
   }
 }
@@ -982,15 +1136,29 @@ function render() {
   ctx.save();
   ctx.translate(shk.x, shk.y);
 
-  // 盤面のうっすら暗幕
-  ctx.fillStyle = "rgba(8,10,26,0.42)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (isRemaster()) {
+    // REMASTER: 盤面は「半透明の暗いパネル + セル全部を区切る細いグリッド」。
+    // 参考動画と同じく、空きマスの位置が常に読めるようにする。
+    const sk = Effects.skin();
+    ctx.fillStyle = `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.62)`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = `rgba(${sk.grid[0]},${sk.grid[1]},${sk.grid[2]},0.13)`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 1; x < COLS; x++) { ctx.moveTo(x * CELL + 0.5, 0); ctx.lineTo(x * CELL + 0.5, ROWS * CELL); }
+    for (let y = 1; y < ROWS; y++) { ctx.moveTo(0, y * CELL + 0.5); ctx.lineTo(COLS * CELL, y * CELL + 0.5); }
+    ctx.stroke();
+  } else {
+    // 盤面のうっすら暗幕
+    ctx.fillStyle = "rgba(8,10,26,0.42)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // グリッド（微細ドット）
-  ctx.fillStyle = "rgba(255,255,255,0.06)";
-  for (let x = 1; x < COLS; x++)
-    for (let y = 1; y < ROWS; y++)
-      ctx.fillRect(x * CELL - 1, y * CELL - 1, 2, 2);
+    // グリッド（微細ドット）
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    for (let x = 1; x < COLS; x++)
+      for (let y = 1; y < ROWS; y++)
+        ctx.fillRect(x * CELL - 1, y * CELL - 1, 2, 2);
+  }
 
   // セル（豪華コマに含まれるものは個別に描かず、大きな1個として描く）
   for (let y = 0; y < ROWS; y++)
@@ -1022,6 +1190,23 @@ function render() {
     }
   }
 
+  // 落下ガイド（REMASTER）: 参考動画では落下中のコマの2列が縦線で示される。
+  // どの列に落ちるかが常に読めるので、盤面を目で追う量が減る。
+  if (isRemaster() && current && running && !gameOver) {
+    const sk = Effects.skin();
+    const gx = current.x * CELL, gw = 2 * CELL;
+    ctx.save();
+    ctx.fillStyle = `rgba(${sk.grid[0]},${sk.grid[1]},${sk.grid[2]},0.07)`;
+    ctx.fillRect(gx, 0, gw, ROWS * CELL);
+    ctx.strokeStyle = `rgba(${sk.grid[0]},${sk.grid[1]},${sk.grid[2]},0.5)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(gx + 1, 0); ctx.lineTo(gx + 1, ROWS * CELL);
+    ctx.moveTo(gx + gw - 1, 0); ctx.lineTo(gx + gw - 1, ROWS * CELL);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // 落下ピース（着地予測のゴースト付き）
   if (current) {
     let gy = current.y;
@@ -1047,7 +1232,34 @@ function render() {
   if (running && !gameOver) {
     const frac = timelineBeat * 2 % 1;
     const colf = timelineCol + frac;
-    if (colf >= 0 && colf < COLS) {
+    if (colf >= 0 && colf < COLS && isRemaster()) {
+      // REMASTER のタイムライン。参考動画の実測に合わせた構成:
+      //   ・幅およそ1セルの暖色の「帯」（線ではない）
+      //   ・帯の後方(左)へ伸びる減衰グラデーションの尾
+      //   ・先端に細くはっきりした縦線
+      //   ・盤面の上端に進行位置を示す三角マーカー
+      const sk = Effects.skin();
+      const tl = chaining() ? HL_CHAIN : sk.line;
+      const tx = colf * CELL, H = ROWS * CELL;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const band = ctx.createLinearGradient(tx - CELL * 2.4, 0, tx + CELL * 0.5, 0);
+      band.addColorStop(0.00, rgbaOf(tl, 0));
+      band.addColorStop(0.55, rgbaOf(tl, 0.16));
+      band.addColorStop(0.88, rgbaOf(tl, 0.42));
+      band.addColorStop(1.00, rgbaOf(tl, 0.10));
+      ctx.fillStyle = band;
+      ctx.fillRect(tx - CELL * 2.4, 0, CELL * 2.9, H);
+      // 先端のはっきりした縦線
+      ctx.fillStyle = rgbaOf(tl, 0.95);
+      ctx.fillRect(tx - 1.5, 0, 3, H);
+      ctx.restore();
+      // 上端の三角マーカー（加算ではなく実色で置いて位置を読みやすくする）
+      ctx.fillStyle = rgbaOf(tl, 0.95);
+      ctx.beginPath();
+      ctx.moveTo(tx - 7, 0); ctx.lineTo(tx + 7, 0); ctx.lineTo(tx, 11);
+      ctx.closePath(); ctx.fill();
+    } else if (colf >= 0 && colf < COLS) {
       const tx = colf * CELL;
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
@@ -1133,10 +1345,12 @@ function dimBehindBoard(c) {
   if (!r.w) return;
   const pad = 26 * bgScale;
   c.save();
+  // REMASTER の背景は平面で元々静かなので、暗幕は薄めにしてスキンの色を残す
+  const a = isRemaster() ? 0.34 : 0.80;
   const g = c.createLinearGradient(0, r.y - pad, 0, r.y + r.h + pad);
   g.addColorStop(0, "rgba(3,5,12,0)");
-  g.addColorStop(0.10, "rgba(3,5,12,0.80)");
-  g.addColorStop(0.90, "rgba(3,5,12,0.80)");
+  g.addColorStop(0.10, `rgba(3,5,12,${a})`);
+  g.addColorStop(0.90, `rgba(3,5,12,${a})`);
   g.addColorStop(1, "rgba(3,5,12,0)");
   c.fillStyle = g;
   c.fillRect(r.x - pad, r.y - pad, r.w + pad * 2, r.h + pad * 2);
@@ -1209,11 +1423,16 @@ function loop(now) {
         GameAudio.playSlowEnd();
       }
     }
-    timelineBeat += (dt / GameAudio.secondsPerBeat) * (slowTimer > 0 ? SLOW_FACTOR : 1);
-    while (timelineBeat >= beatsPerCol) {
-      timelineBeat -= beatsPerCol;
-      advanceTimeline();
+    // チュートリアルの「作る」ステップでは帯を止めて、じっくり組ませる
+    if (!tutFrozen()) {
+      timelineBeat += (dt / GameAudio.secondsPerBeat) * (slowTimer > 0 ? SLOW_FACTOR : 1);
+      while (timelineBeat >= beatsPerCol) {
+        timelineBeat -= beatsPerCol;
+        advanceTimeline();
+      }
     }
+
+    tutUpdate(dt);
 
     if (Math.floor(now / 250) !== Math.floor((now - dt * 1000) / 250)) updateHud();
   }
@@ -1553,8 +1772,11 @@ window.addEventListener("gamepaddisconnected", () => {
 //   2本指タップ  … 左回転
 // 加えて画面下のボタンでも同じ操作ができる（細かい位置合わせ用）。
 const TAP_MS = 260;          // これより短く、動きが小さければタップ扱い
-const TAP_SLOP = 14;         // タップと見なす移動量(px)
+const TAP_SLOP = 18;         // タップと見なす移動量(px)
 const SWIPE_Y = 42;          // 縦スワイプと見なす移動量(px)
+// 1列動かすのに必要な指の移動量（セル幅の倍数）。
+// 等倍だと指のわずかなブレで列が飛んでシビアすぎたので、2セル幅ぶん動かして1列とする。
+const DRAG_CELLS_PER_COL = 2;
 
 let touchId = null;
 let tx0 = 0, ty0 = 0, tt0 = 0, tCarry = 0, tMoved = false, tTwo = false;
@@ -1563,6 +1785,9 @@ let touchSoftDrop = false;
 function cellPx() {
   const r = canvas.getBoundingClientRect();
   return r.width / COLS;    // 表示上の1セル幅（盤面は縮小表示されることがある）
+}
+function dragStepPx() {
+  return cellPx() * DRAG_CELLS_PER_COL;
 }
 
 const dragZone = document.getElementById("dragzone");
@@ -1585,8 +1810,8 @@ function onGestureMove(e) {
   const dx = e.clientX - tx0;
   const dy = e.clientY - ty0;
   if (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP) tMoved = true;
-  // 横方向はセル単位で追従させる
-  const w = cellPx();
+  // 横方向はセル単位で追従させる（指の移動量 2セル幅 = 1列）
+  const w = dragStepPx();
   const want = Math.trunc((dx - tCarry) / w);
   if (want !== 0) {
     for (let i = 0; i < Math.abs(want); i++) move(Math.sign(want));
@@ -1692,8 +1917,28 @@ document.addEventListener("keyup", (e) => {
   if (e.key === "ArrowDown") softDrop = false;
 });
 
-document.getElementById("start-btn").addEventListener("click", startGame);
+document.getElementById("start-btn").addEventListener("click", () => startGame());
 document.getElementById("retry-btn").addEventListener("click", () => init());
+
+// ===== デザイン切り替えの UI =====
+const themePickerEl = document.getElementById("theme-picker");
+const themeDescEl = document.getElementById("theme-desc");
+function renderThemePicker() {
+  if (!themePickerEl) return;
+  themePickerEl.innerHTML = "";
+  for (const t of THEMES) {
+    const b = document.createElement("button");
+    b.className = "picker-btn" + (t.id === themeId ? " on" : "");
+    b.textContent = t.name;
+    b.addEventListener("click", (e) => { e.stopPropagation(); setTheme(t.id); });
+    themePickerEl.appendChild(b);
+  }
+  const cur = THEMES.find((t) => t.id === themeId);
+  if (themeDescEl && cur) themeDescEl.textContent = cur.desc;
+}
+
+loadTheme();
+applyTheme();
 
 // ===== テスト用フック（自動テストからの状態確認に使用。通常プレイに影響なし） =====
 window.LUMINA = {
@@ -1715,6 +1960,13 @@ window.LUMINA = {
     return out;
   },
   get paused() { return paused; },
+  get maxCombo() { return maxCombo; },
+  get timelineCol() { return timelineCol; },
+  get theme() { return themeId; },
+  get tutStep() { return tutStep; },
+  get gravityBeats() { return gravityBeats(); },
+  setTheme,
+  startTutorial() { startTutorial(); },
   pieceX() { return current ? current.x : null; },
   pieceY() { return current ? current.y : null; },
   pieceCells() { return current ? current.cells : null; },
@@ -1734,6 +1986,198 @@ window.LUMINA = {
   fillBurst() { burstGauge = BURST_MAX; burstReady = true; updateHud(); },
   triggerBurst,
 };
+
+// ===== チュートリアル =====
+// シングルプレイと同じ盤面・同じ操作のまま、盤面を作り込んだ状態から始めて
+// 「1つのルールを1回体験する」を6回くり返す。読ませるより先に触らせる。
+const tutEl = document.getElementById("tutorial");
+const tutNoEl = document.getElementById("tut-no");
+const tutTotalEl = document.getElementById("tut-total");
+const tutTitleEl = document.getElementById("tut-title");
+const tutBodyEl = document.getElementById("tut-body");
+const tutGoalEl = document.getElementById("tut-goal");
+const tutQuitEl = document.getElementById("tut-quit");
+
+let tutorialMode = false;
+let tutStep = -1;
+let tutClearT = 0;      // 達成メッセージを見せている残り秒数
+let tutSeen = {};       // ステップ内で観測した状態（回転した/移動した など）
+
+// 盤面を作るヘルパ。fn(x, y) が色を返す。
+function tutBoard(fn) {
+  const g = makeGrid(EMPTY);
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++) g[y][x] = fn(x, y) || EMPTY;
+  board = g;
+  bigSize = makeGrid(0);
+  bigTop = makeGrid(0);
+  markMatches();
+  findBigBlocks();
+  updateHud();
+}
+
+const TUT_STEPS = [
+  {
+    title: "動かす・回す",
+    body: "落ちてくるのは 2色 4マスのコマ。左右で列を選び、回転で 4マスの色の並びを変えます。"
+        + "（スマホは盤面の下をドラッグ＝移動、タップ＝右回転）",
+    goal: "左右に動かして、1回まわしてみましょう",
+    freeze: true,
+    setup() { tutBoard(() => EMPTY); },
+    done() { return tutSeen.moved && tutSeen.rotated; },
+  },
+  {
+    title: "2×2 にそろえる",
+    body: "同じ色が 2×2 の正方形になると、そのマスが「消去待ち」になって枠が光ります。"
+        + "そろえただけでは、まだ消えません。",
+    goal: "左下の水色があと1マスで 2×2 です。水色が右下に来るように回して置きましょう",
+    freeze: true,   // タイムラインを止めて、じっくり作らせる
+    setup() {
+      // 2x2 に「あと1マス」の L 字。この時点では正方形ではない。
+      tutBoard((x, y) =>
+        (x === 2 && y >= 8) || (x === 3 && y === 9) ? COLOR_A : EMPTY);
+    },
+    done() {
+      for (let y = 0; y < ROWS; y++)
+        for (let x = 0; x < COLS; x++) if (marked[y][x]) return true;
+      return false;
+    },
+  },
+  {
+    title: "タイムラインが消す",
+    body: "左から右へ流れる帯が「タイムライン」。これが通過した列の消去待ちだけが消えます。"
+        + "そろえるタイミングと、帯が通るタイミングの両方が大事です。",
+    goal: "タイムラインが通過して消えるのを見てみましょう",
+    setup() {
+      // 消去待ちを置いた状態から始めて、通過→消去だけを見せる
+      tutBoard((x, y) => (y >= 8 && x >= 3 && x <= 6 ? COLOR_B : EMPTY));
+      timelineCol = -1; timelineBeat = 0;
+      tutSeen.score0 = score;
+    },
+    done() { return score > tutSeen.score0; },
+  },
+  {
+    title: "連鎖（COMBO）",
+    body: "タイムラインが1周するあいだに消えると COMBO が1つ増え、次の1周でも消えるとさらに増えます。"
+        + "COMBO が増えるほど得点の倍率が上がります。連鎖中は帯と消えるコマが同じ色になります。",
+    goal: "下の山は 2周続けて消えるように積んであります。COMBO x2 を見てみましょう",
+    setup() {
+      // 1周目で水色が消え、落ちてきた桃色が2周目で消えるように組んである。
+      //   col2: 下から A,A,B,B        col3: 下から A,A,(空),B,B
+      // 初期状態で正方形になっているのは最下段の A だけ。
+      tutBoard((x, y) => {
+        if (x === 2) return y >= 8 ? COLOR_A : (y === 6 || y === 7) ? COLOR_B : EMPTY;
+        if (x === 3) return y >= 8 ? COLOR_A : (y === 5 || y === 6) ? COLOR_B : EMPTY;
+        return EMPTY;
+      });
+      timelineCol = -1; timelineBeat = 0;
+      combo = 0; maxCombo = 0; updateHud();
+    },
+    done() { return maxCombo >= 2; },
+  },
+  {
+    title: "豪華コマ",
+    body: "正方形を 3×3・4×4 と大きくすると、1個の大きなコマに変わって単価が上がります。"
+        + "同じマス数でも、まとめて大きく作るほど得点が伸びます。",
+    goal: "水色があと2マスで 3×3 です。タイムラインは止めてあるので、じっくり作りましょう",
+    freeze: true,
+    setup() {
+      // 3x3 から2マス欠けた形。この時点では 2x2 すら成立していない。
+      tutBoard((x, y) => {
+        if (x === 2 && y >= 7) return COLOR_A;          // 縦3
+        if (x === 3 && y === 9) return COLOR_A;          // 最下段だけ
+        if (x === 4 && y >= 8) return COLOR_A;           // 縦2
+        return EMPTY;
+      });
+      bestBig = 0;
+    },
+    done() { return bestBig >= BIG_MIN; },
+  },
+  {
+    title: "BURST A / B",
+    body: "消すほどたまる BURST ゲージが満タンになると、2種類の必殺技が使えます。"
+        + "A（Enter）は最下段4行を薙ぎ払って立て直す用。"
+        + "B（Shift）はタイムラインを遅くして、大きな正方形を作る時間をかせぐ用です。",
+    goal: "ゲージを満タンにしてあります。BURST A か B を使ってみましょう",
+    setup() {
+      tutBoard((x, y) => (y >= 6 ? ((x + y) % 3 === 0 ? COLOR_A : COLOR_B) : EMPTY));
+      burstGauge = BURST_MAX; burstReady = true;
+      Effects.setBurstReady(true);
+      updateHud();
+      tutSeen.burstUsed = false;
+    },
+    done() { return tutSeen.burstUsed; },
+  },
+];
+
+// このステップではタイムラインを止めるか
+function tutFrozen() {
+  return tutorialMode && tutStep >= 0 && !!(TUT_STEPS[tutStep] || {}).freeze;
+}
+
+function tutShow() {
+  const s = TUT_STEPS[tutStep];
+  if (!s) return;
+  tutNoEl.textContent = String(tutStep + 1);
+  tutTotalEl.textContent = String(TUT_STEPS.length);
+  tutTitleEl.textContent = s.title;
+  tutBodyEl.textContent = s.body;
+  tutGoalEl.textContent = "▶ " + s.goal;
+  tutGoalEl.classList.remove("done");
+}
+
+function tutGo(n) {
+  tutStep = n;
+  if (tutStep >= TUT_STEPS.length) { tutFinish(); return; }
+  tutSeen = { score0: score };
+  // 帯を止めるステップでは、盤面の外に退けてから止める（途中で固まって見えないように）
+  if (TUT_STEPS[tutStep].freeze) { timelineCol = -1; timelineBeat = 0; }
+  TUT_STEPS[tutStep].setup();
+  spawnPiece();
+  tutShow();
+}
+
+function tutFinish() {
+  tutorialMode = false;
+  tutEl.classList.add("hidden");
+  document.body.classList.remove("tut-on");
+  running = false;
+  current = null;
+  Effects.banner("TUTORIAL CLEAR", "#7fe9ff", "これで一通り遊べます");
+  startOverlay.classList.remove("hidden");
+}
+
+function startTutorial() {
+  GameAudio.start();
+  startOverlay.classList.add("hidden");
+  running = true;
+  init();
+  tutorialMode = true;
+  tutEl.classList.remove("hidden");
+  document.body.classList.add("tut-on");
+  tutGo(0);
+}
+
+// 毎フレーム、いまのステップの達成条件を見る
+function tutUpdate(dt) {
+  if (!tutorialMode || tutStep < 0) return;
+  if (tutClearT > 0) {
+    tutClearT -= dt;
+    if (tutClearT <= 0) tutGo(tutStep + 1);
+    return;
+  }
+  const s = TUT_STEPS[tutStep];
+  if (s && s.done()) {
+    tutGoalEl.textContent = "✔ できました";
+    tutGoalEl.classList.add("done");
+    GameAudio.playLevelUp();
+    tutClearT = 1.6;
+  }
+}
+
+if (tutQuitEl) tutQuitEl.addEventListener("click", () => tutFinish());
+const tutBtn = document.getElementById("tutorial-btn");
+if (tutBtn) tutBtn.addEventListener("click", (e) => { e.stopPropagation(); startTutorial(); });
 
 // ===== 起動 =====
 resizeBg();

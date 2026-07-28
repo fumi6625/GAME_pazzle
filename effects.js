@@ -411,6 +411,41 @@ const Effects = (() => {
     { accent: [255, 74, 150], sub: [96, 120, 255], warm: [255, 176, 208], sky: [10, 4, 14], dens: 2.00, cam: 1.85, grid: 2.40 },
   ];
 
+  // ===== テーマ =====
+  // "arise"    … これまでの 3D ドローンシティ
+  // "remaster" … ルミネス リマスター寄せ。背景は平面2Dのスキンだけにして、
+  //              盤面・コマ・タイムラインの見せ方に情報量を集中させる。
+  let themeId = "arise";
+  function setTheme(id) { themeId = id === "remaster" ? "remaster" : "arise"; }
+  function theme() { return themeId; }
+
+  // ===== REMASTER のスキン =====
+  // 参考動画（ルミネス リマスター）で確認できた作り:
+  //   ・背景は「一様なグラデーション + モチーフ1つ」だけの平面。奥行き表現はしない
+  //   ・スキンごとにコマ2色・タイムライン色・グリッド色がまとめて変わる
+  //   ・レベル（＝曲の進行）で次のスキンへ切り替わる
+  // ink=盤面パネル, a/b=コマの2色, line=タイムライン, grid=盤面グリッド
+  // ※ 参考動画のスキンには明るい色面のものもあるが、この実装は HUD が明色なので、
+  //    可読性を保つため色相はそのままに輝度を中〜暗に寄せてある。
+  const SKINS = [
+    { id: "MINT", sky: [[74, 118, 112], [16, 38, 40]], ink: [10, 26, 30],
+      a: [64, 172, 222], b: [238, 245, 248], line: [255, 206, 92], grid: [186, 236, 226], motif: "rings" },
+    { id: "VIOLET", sky: [[92, 62, 132], [42, 26, 66]], ink: [20, 12, 34],
+      a: [226, 96, 196], b: [240, 238, 250], line: [255, 226, 120], grid: [214, 180, 255], motif: "bars" },
+    { id: "EMBER", sky: [[74, 44, 34], [26, 16, 16]], ink: [26, 14, 10],
+      a: [255, 140, 56], b: [236, 232, 226], line: [120, 226, 255], grid: [255, 190, 130], motif: "bokeh" },
+    { id: "TEAL", sky: [[26, 82, 92], [8, 30, 40]], ink: [6, 22, 30],
+      a: [96, 226, 214], b: [244, 248, 246], line: [255, 176, 96], grid: [150, 240, 232], motif: "horizon" },
+    { id: "CRIMSON", sky: [[104, 26, 44], [30, 10, 18]], ink: [26, 8, 14],
+      a: [255, 84, 96], b: [242, 236, 234], line: [255, 232, 140], grid: [255, 150, 160], motif: "grid" },
+    { id: "INDIGO", sky: [[36, 48, 110], [10, 14, 38]], ink: [8, 12, 30],
+      a: [110, 150, 255], b: [238, 242, 252], line: [255, 214, 96], grid: [160, 186, 255], motif: "sun" },
+  ];
+  // レベルが上がるたびに次のスキンへ。切り替えは 0.9 秒でクロスフェード。
+  let skinIdx = 0, skinPrev = 0, skinFade = 1;
+  function skin() { return SKINS[skinIdx]; }
+  function skinCount() { return SKINS.length; }
+
   let bgW = 0, bgH = 0, bgInit = false;
   let halfW = 0, halfH = 0;
   let time = 0, prevBeat = 0, beatCount = 0, barPulse = 0;
@@ -432,6 +467,9 @@ const Effects = (() => {
     levelNo = Math.max(1, n | 0);
     levelHue = ((levelNo - 1) * 26) % 360;      // 1段ごとに色相を26度ずらす
     levelSpeed = 1 + Math.min(0.9, (levelNo - 1) * 0.06);
+    // REMASTER: レベル = スキン。1段ごとに世界の色がまるごと入れ替わる。
+    const want = (levelNo - 1) % SKINS.length;
+    if (want !== skinIdx) { skinPrev = skinIdx; skinIdx = want; skinFade = 0; }
   }
   function levelUpSurge() { levelSurge = 1; }
 
@@ -562,6 +600,130 @@ const Effects = (() => {
     const far = 1 - t * t;
     const near = Math.min(1, Math.max(0, (dz - 90) / NEAR_FADE));
     return far * near;
+  }
+
+  // ===== REMASTER: 平面2Dスキンの描画 =====
+  // 参考動画では背景に奥行きが無い。1枚の色面 + モチーフ1つで、
+  // 「盤面が主役、背景は雰囲気」という関係をはっきりさせる。
+  function skinField(ctx, w, h, S, t, pulse, bar, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // --- ベースの色面 ---
+    const g = ctx.createLinearGradient(0, 0, w * 0.25, h);
+    g.addColorStop(0, rgba(S.sky[0], 1));
+    g.addColorStop(1, rgba(S.sky[1], 1));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+
+    const cx = w * 0.5, cy = h * 0.5;
+    const R = Math.max(w, h);
+    ctx.globalCompositeOperation = "lighter";
+
+    if (S.motif === "rings") {
+      // 同心円がゆっくり広がる。拍で1枚ぶん明るくなる。
+      for (let i = 0; i < 7; i++) {
+        const ph = (t * 0.055 + i / 7) % 1;
+        const r = ph * R * 0.72;
+        const a = (1 - ph) * (0.10 + pulse * 0.10) * alpha;
+        if (a <= 0.004 || r < 4) continue;
+        ctx.strokeStyle = rgba(S.grid, a);
+        ctx.lineWidth = 2 + (1 - ph) * 22;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
+      }
+    } else if (S.motif === "bars") {
+      // ゆっくり流れる縦帯
+      const n = 9;
+      for (let i = 0; i < n; i++) {
+        const x = ((i / n + t * 0.02) % 1) * (w + 200) - 100;
+        const bw = w * (0.05 + 0.05 * Math.sin(i * 2.3));
+        const a = (0.05 + pulse * 0.05) * alpha;
+        const lg = ctx.createLinearGradient(x, 0, x + bw, 0);
+        lg.addColorStop(0, rgba(S.grid, 0));
+        lg.addColorStop(0.5, rgba(S.grid, a));
+        lg.addColorStop(1, rgba(S.grid, 0));
+        ctx.fillStyle = lg;
+        ctx.fillRect(x, 0, bw, h);
+      }
+    } else if (S.motif === "bokeh") {
+      // 大きなボケ玉が漂う
+      for (let i = 0; i < 10; i++) {
+        const sd = Math.sin(i * 41.7) * 43758.5453;
+        const rnd = sd - Math.floor(sd);
+        const x = ((rnd + t * 0.012 * (0.4 + rnd)) % 1.2 - 0.1) * w;
+        const y = (0.15 + 0.7 * ((rnd * 7.3) % 1)) * h + Math.sin(t * 0.3 + i) * 18;
+        const r = R * (0.05 + rnd * 0.13);
+        const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+        rg.addColorStop(0, rgba(S.grid, (0.07 + pulse * 0.05) * alpha));
+        rg.addColorStop(1, rgba(S.grid, 0));
+        ctx.fillStyle = rg;
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+    } else if (S.motif === "horizon") {
+      // 下方向の地平グロー + 平面のスカイライン（silhouette）
+      const hg = ctx.createLinearGradient(0, h * 0.58, 0, h);
+      hg.addColorStop(0, rgba(S.grid, 0));
+      hg.addColorStop(1, rgba(S.grid, (0.14 + pulse * 0.08) * alpha));
+      ctx.fillStyle = hg;
+      ctx.fillRect(0, h * 0.58, w, h * 0.42);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = rgba(S.sky[1], 0.55 * alpha);
+      const base = h * 0.9, unit = w / 26;
+      for (let i = 0; i < 26; i++) {
+        const sd = Math.sin((i + skinIdx * 3) * 12.9898) * 43758.5453;
+        const rnd = sd - Math.floor(sd);
+        const bh = h * (0.04 + rnd * 0.13);
+        ctx.fillRect(i * unit + (t * 6) % unit - unit, base - bh, unit * 0.82, bh);
+      }
+    } else if (S.motif === "grid") {
+      // 平面のグリッド（3Dにはしない）が横へ流れる
+      const cell = Math.max(28, h / 12);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = rgba(S.grid, (0.055 + pulse * 0.045) * alpha);
+      ctx.beginPath();
+      const ox = (t * 26) % cell;
+      for (let x = -cell; x < w + cell; x += cell) { ctx.moveTo(x + ox, 0); ctx.lineTo(x + ox, h); }
+      for (let y = 0; y < h + cell; y += cell) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+      ctx.stroke();
+    } else if (S.motif === "sun") {
+      // 大きな円盤と、そこから伸びる淡い扇
+      const r = R * (0.20 + bar * 0.012);
+      const rg = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
+      rg.addColorStop(0, rgba(S.grid, (0.16 + pulse * 0.08) * alpha));
+      rg.addColorStop(1, rgba(S.grid, 0));
+      ctx.fillStyle = rg;
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      for (let i = 0; i < 12; i++) {
+        const ang = (i / 12) * TAU + t * 0.06;
+        ctx.strokeStyle = rgba(S.grid, (0.035 + pulse * 0.03) * alpha);
+        ctx.lineWidth = 26;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * r * 0.7, cy + Math.sin(ang) * r * 0.7);
+        ctx.lineTo(cx + Math.cos(ang) * R * 0.8, cy + Math.sin(ang) * R * 0.8);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawSkin(ctx, w, h, dt, beat, intensity) {
+    const pulse = Math.pow(1 - beat, 3);
+    if (beat < prevBeat) { beatCount++; if (beatCount % 4 === 0) barPulse = 1; }
+    prevBeat = beat;
+    barPulse = Math.max(0, barPulse - dt * 1.6);
+    skinFade = Math.min(1, skinFade + dt / 0.9);
+
+    // 切り替え中は前のスキンの上に新しいスキンを重ねてクロスフェード
+    if (skinFade < 1) skinField(ctx, w, h, SKINS[skinPrev], time, pulse, barPulse, 1);
+    skinField(ctx, w, h, SKINS[skinIdx], time, pulse, barPulse, skinFade);
+
+    // 盤面まわりを少しだけ落として、HUD とコマの可読性を確保する
+    const vg = ctx.createRadialGradient(w * 0.5, h * 0.5, Math.min(w, h) * 0.22,
+                                        w * 0.5, h * 0.5, Math.max(w, h) * 0.72);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, `rgba(0,0,0,${(0.52 + (1 - intensity) * 0.06).toFixed(3)})`);
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
   }
 
   function initBg(w, h) {
@@ -700,6 +862,8 @@ const Effects = (() => {
   function drawBackground(ctx, w, h, dt, beat, intensity = 1) {
     if (!bgInit || w !== bgW || h !== bgH) { initBg(w, h); if (!bgInit) return; }
     time += dt;
+    // REMASTER テーマは 3D を使わず、平面のスキンを敷くだけにする
+    if (themeId === "remaster") { drawSkin(ctx, w, h, dt, beat, intensity); return; }
 
     const pulse = Math.pow(1 - beat, 3);
     if (beat < prevBeat) { beatCount++; if (beatCount % 4 === 0) barPulse = 1; }  // 4拍子
@@ -997,5 +1161,6 @@ const Effects = (() => {
     burst, shatter, ring, column, popup, scorePop, zone, screenFlash, screenShake,
     update, drawForeground, drawBackground, getShake, reset, initBg,
     setBurstReady, banner, drawBanners, setQuality, setLevel, levelUpSurge,
+    setTheme, theme, skin, skinCount,
   };
 })();

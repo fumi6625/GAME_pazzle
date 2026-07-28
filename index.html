@@ -59,7 +59,18 @@
                 <p class="overlay-kicker">READY</p>
                 <p class="overlay-title">LUMINA ARISE</p>
                 <p class="overlay-sub">音と光のブロックシーケンサー</p>
-                <button id="start-btn" class="start-btn">START</button>
+
+                <!-- 見た目の切り替え。どちらでも遊べる -->
+                <div class="picker">
+                  <span class="picker-label">DESIGN</span>
+                  <div id="theme-picker" class="picker-row"></div>
+                  <p id="theme-desc" class="picker-desc"></p>
+                </div>
+
+                <div class="mode-btns">
+                  <button id="start-btn" class="start-btn">START</button>
+                  <button id="tutorial-btn" class="start-btn ghost">チュートリアル</button>
+                </div>
                 <p class="overlay-hint">クリック / SPACE / コントローラーのボタン で開始（音が鳴ります）</p>
                 <div class="rank-panel">
                   <p class="rank-title">BEST 10</p>
@@ -83,6 +94,18 @@
                 <p class="overlay-hint">R キーでも再挑戦</p>
               </div>
             </div>
+          </div>
+
+          <!-- チュートリアルの説明パネル。盤面のすぐ下に置いて、
+               盤面から目を離さずに読めるようにする。 -->
+          <div id="tutorial" class="tut hidden">
+            <div class="tut-head">
+              <span class="tut-step">STEP <span id="tut-no">1</span>/<span id="tut-total">6</span></span>
+              <span id="tut-title" class="tut-title"></span>
+              <button id="tut-quit" class="tut-quit">やめる</button>
+            </div>
+            <p id="tut-body" class="tut-body"></p>
+            <p id="tut-goal" class="tut-goal"></p>
           </div>
 
           <!-- 親指で操作するための領域。盤面の下に置くことで、
@@ -156,14 +179,14 @@
 
         <!-- タッチ操作（pointer:coarse の端末でのみ表示）。
              左右移動は盤面のドラッグで行うのでボタンは置かない。
-             下から順に「回転（大・隣同士）」「BURST A/B」「ドロップ」。 -->
+             上から順に「即落下（横いっぱい）」「左回転／右回転」「BURST A/B」。
+             ソフトドロップは下スワイプで出せるのでボタンは置かない。 -->
         <div id="touchpad" class="touchpad">
-          <button class="tbtn tbtn-drop" data-act="softDrop" aria-label="ソフトドロップ">▼</button>
-          <button class="tbtn tbtn-drop" data-act="hardDrop" aria-label="即落下">⤓</button>
-          <button class="tbtn tbtn-a" data-act="burst">BURST A</button>
-          <button class="tbtn tbtn-b" data-act="slow">BURST B</button>
+          <button class="tbtn tbtn-hard" data-act="hardDrop" aria-label="即落下">⤓</button>
           <button class="tbtn tbtn-rot" data-act="rotateCCW" aria-label="左回転">↺</button>
           <button class="tbtn tbtn-rot" data-act="rotateCW" aria-label="右回転">↻</button>
+          <button class="tbtn tbtn-a" data-act="burst">BURST A</button>
+          <button class="tbtn tbtn-b" data-act="slow">BURST B</button>
         </div>
       </div>
     </div>
