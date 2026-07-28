@@ -503,15 +503,6 @@ body {
   padding-bottom: 2px;
 }
 
-/* 連鎖中の COMBO 表示は脈動させる（色は game.js が連鎖段階に応じて設定する） */
-.stat-value.chaining {
-  animation: combo-throb 0.42s ease-in-out infinite alternate;
-}
-@keyframes combo-throb {
-  from { transform: scale(1); filter: brightness(1); }
-  to   { transform: scale(1.22); filter: brightness(1.5); }
-}
-
 /* ===== ボタン設定画面 =====
    項目数が多く盤面(400px)には収まらないので、画面全体を覆う独立したモーダルにする */
 #padcfg {

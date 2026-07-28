@@ -732,15 +732,10 @@ function resolveSweep() {
     if (sweepCleared >= 8) pts += 100;
     score += pts;
 
-    // COMBO はコンボ段数に応じて派手さが増す
+    // 連鎖はバナーと音で伝える。画面全体を揺らすと目が疲れるので控える。
     if (combo >= 2) {
-      const heat = Math.min(1, (combo - 1) / 5);
-      Effects.banner("COMBO x" + combo, "#ffe27a");
-      Effects.screenFlash(0.12 + heat * 0.3);
-      Effects.screenShake(2 + heat * 8);
-      for (let i = 0; i < 1 + Math.min(4, combo); i++)
-        Effects.ring(canvas.width / 2, canvas.height / 2,
-          "#ffe27a", canvas.width * (0.25 + i * 0.16));
+      Effects.banner("COMBO x" + combo, rgbaOf(HL_CHAIN, 1));
+      Effects.screenFlash(0.10);
       GameAudio.playCombo(combo);
     }
     if (mult >= 4) {
@@ -873,15 +868,10 @@ function triggerBurst() {
 function updateHud() {
   scoreEl.textContent = score;
   squaresEl.textContent = Math.floor(squaresCleared);
-  // HUD の COMBO も盤面のハイライトと同じ色にして、両者が同じ状態を指すようにする
+  // HUD の COMBO も盤面のハイライトと同じ琥珀にして、両者が同じ状態を指すようにする
   comboEl.textContent = combo;
-  if (comboEl) {
-    const T = comboTier();
-    comboEl.style.color = combo >= 1 ? rgbaOf(T.edge, 1) : "";
-    comboEl.style.textShadow = combo >= 1
-      ? `0 0 ${8 + T.power * 8}px ${rgbaOf(T.halo, 0.9)}` : "";
-    comboEl.classList.toggle("chaining", combo >= 2);
-  }
+  comboEl.style.color = chaining() ? rgbaOf(HL_CHAIN, 1) : "";
+  comboEl.style.textShadow = chaining() ? `0 0 10px ${rgbaOf(HL_CHAIN, 0.7)}` : "";
   const s = Math.floor(elapsedMs / 1000);
   timeEl.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   burstFillEl.style.width = (burstGauge / BURST_MAX * 100) + "%";
@@ -947,60 +937,40 @@ function endGame() {
 
 // ===== 描画 =====
 /*
- * 消去待ちハイライトの色は「いま何連鎖目か」で変わる。
- * 連鎖していない時は従来どおり白。連鎖が乗ると 金 → 橙 → マゼンタ → 白熱 と
- * 段階的に変わり、脈動が速く・強くなるので、盤面を見ているだけで連鎖中と分かる。
+ * 消去待ちハイライトの色は「連鎖中かどうか」の2状態だけ。
+ * 連鎖していなければ白、連鎖中は琥珀。
+ * 同じ琥珀をタイムラインにも使うので、「いま流れている線が、この光っている
+ * コマを連鎖として消している」という対応が一目で分かる。
+ * 連鎖数は HUD の COMBO と盤面下のバナーで読めるので、色は段階分けしない。
  */
-const COMBO_TIERS = [
-  { edge: [255, 255, 255], halo: [190, 225, 255], rate: 110, power: 0.0 },  // 連鎖なし
-  { edge: [190, 255, 235], halo: [120, 255, 220], rate: 96,  power: 0.5 },  // 1連鎖
-  { edge: [255, 226, 122], halo: [255, 200, 90],  rate: 82,  power: 1.0 },  // 2連鎖
-  { edge: [255, 168, 64],  halo: [255, 140, 50],  rate: 68,  power: 1.5 },  // 3連鎖
-  { edge: [255, 108, 210], halo: [255, 80, 190],  rate: 56,  power: 2.0 },  // 4連鎖
-  { edge: [235, 255, 255], halo: [255, 255, 255], rate: 44,  power: 2.6 },  // 5連鎖以上
-];
-function comboTier() {
-  return COMBO_TIERS[Math.max(0, Math.min(COMBO_TIERS.length - 1, combo))];
-}
+const HL_IDLE = [255, 255, 255];    // 連鎖なし
+const HL_CHAIN = [255, 206, 92];    // 連鎖中（琥珀）
+const chaining = () => combo >= 1;
+const hlColor = () => (chaining() ? HL_CHAIN : HL_IDLE);
+// 脈動はごく穏やかに（周期 620ms・振幅小）。目立たせるのは色の違いで足りる。
+const hlPulse = () => 0.5 + 0.5 * Math.sin(performance.now() / 620);
 const rgbaOf = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
 function drawCell(c, x, y, color, size, opts = {}) {
   c.drawImage(blockSprite(color, size), x * size, y * size);
   if (opts.marked) {
-    const T = comboTier();
-    // 連鎖が深いほど速く脈動する
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / T.rate);
+    const col = hlColor();
+    const pulse = hlPulse();
     const px = x * size, py = y * size;
 
-    // 連鎖中は外側にハロー（滲み）を足して、ひと目で見分けられるようにする
-    if (T.power > 0) {
-      c.save();
-      c.globalCompositeOperation = "lighter";
-      c.globalAlpha = (0.16 + pulse * 0.22) * T.power;
-      const r = size * 0.9;
-      const g = c.createRadialGradient(px + size / 2, py + size / 2, size * 0.18,
-                                       px + size / 2, py + size / 2, r);
-      g.addColorStop(0, rgbaOf(T.halo, 0.85));
-      g.addColorStop(1, rgbaOf(T.halo, 0));
-      c.fillStyle = g;
-      c.fillRect(px - size * 0.4, py - size * 0.4, size * 1.8, size * 1.8);
-      c.restore();
-    }
-
-    // 本体の増光（連鎖が深いほど明るく）
+    // 本体の増光（控えめ）
     c.save();
     c.globalCompositeOperation = "lighter";
-    c.globalAlpha = 0.25 + pulse * (0.3 + T.power * 0.14);
+    c.globalAlpha = 0.20 + pulse * 0.16;
     c.drawImage(blockSprite(color, size), px, py);
     c.restore();
 
-    // 面取り八角形に沿った枠のパルス（色が連鎖段階を示す）
+    // 面取り八角形に沿った枠。色だけが連鎖の有無を示す。
     c.save();
     c.translate(px, py);
     polyPath(c, facetPoints(size, Math.max(1.5, size * 0.045) + 1, size * 0.2, 1));
-    c.strokeStyle = rgbaOf(T.edge, 0.45 + pulse * 0.5);
-    c.lineWidth = 2 + T.power * 0.7;
-    if (T.power > 0) { c.shadowColor = rgbaOf(T.halo, 1); c.shadowBlur = 6 + T.power * 7; }
+    c.strokeStyle = rgbaOf(col, 0.6 + pulse * 0.3);
+    c.lineWidth = 2;
     c.stroke();
     c.restore();
   }
@@ -1037,21 +1007,17 @@ function render() {
       ctx.drawImage(bigBlockSprite(board[y][x], n), px, py);
       // 消去待ちの脈動（大きいほど強く光る）
       if (marked[y][x]) {
-        const T = comboTier();
-        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / T.rate);
+        const pulse = hlPulse();
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
-        ctx.globalAlpha = (0.18 + pulse * (0.3 + T.power * 0.12)) * (1 + (n - 3) * 0.2);
+        ctx.globalAlpha = (0.16 + pulse * 0.18) * (1 + (n - 3) * 0.15);
         ctx.drawImage(bigBlockSprite(board[y][x], n), px, py);
         ctx.restore();
-        // 豪華コマは金枠が基調だが、連鎖中は連鎖色を混ぜて状態を示す
-        const edge = T.power > 0 ? T.edge : [255, 232, 150];
-        ctx.strokeStyle = rgbaOf(edge, 0.5 + pulse * 0.5);
-        ctx.lineWidth = 3 + T.power * 0.8;
-        if (T.power > 0) { ctx.shadowColor = rgbaOf(T.halo, 1); ctx.shadowBlur = 10 + T.power * 8; }
+        // 豪華コマの枠は元々金なので、連鎖中だけ同じ琥珀へ寄せる
+        ctx.strokeStyle = rgbaOf(chaining() ? HL_CHAIN : [255, 232, 150], 0.6 + pulse * 0.3);
+        ctx.lineWidth = 3;
         roundRectPath(ctx, px + 3, py + 3, sz - 6, sz - 6, sz * 0.1);
         ctx.stroke();
-        ctx.shadowBlur = 0;
       }
     }
   }
@@ -1086,48 +1052,26 @@ function render() {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       // 尾（左側に減衰するグラデ）
-      const T = comboTier();
+      // 連鎖中はタイムラインも消去待ちのコマと同じ琥珀にする。
+      // 「この線がこのコマを連鎖として消している」という対応を色で示す。
+      const tl = chaining() ? HL_CHAIN : [120, 210, 255];
       const tail = ctx.createLinearGradient(tx - 90, 0, tx, 0);
-      tail.addColorStop(0, rgbaOf(T.halo, 0));
-      tail.addColorStop(1, rgbaOf(T.halo, 0.22 + T.power * 0.06));
+      tail.addColorStop(0, rgbaOf(tl, 0));
+      tail.addColorStop(1, rgbaOf(tl, 0.24));
       ctx.fillStyle = tail;
       ctx.fillRect(tx - 90, 0, 90, ROWS * CELL);
       // コアライン
       const core = ctx.createLinearGradient(tx - 5, 0, tx + 5, 0);
-      core.addColorStop(0, "rgba(160,230,255,0)");
-      core.addColorStop(0.5, "rgba(235,250,255,0.95)");
-      core.addColorStop(1, "rgba(160,230,255,0)");
+      core.addColorStop(0, rgbaOf(tl, 0));
+      core.addColorStop(0.5, "rgba(250,250,250,0.95)");   // 芯は白のまま
+      core.addColorStop(1, rgbaOf(tl, 0));
       ctx.fillStyle = core;
       ctx.fillRect(tx - 5, 0, 10, ROWS * CELL);
       // 先端の輝き
-      ctx.fillStyle = "rgba(200,240,255,0.5)";
+      ctx.fillStyle = rgbaOf(tl, 0.55);
       ctx.fillRect(tx - 1, 0, 2, ROWS * CELL);
       ctx.restore();
     }
-  }
-
-  // 連鎖中は盤面の縁が連鎖色に脈動する（COMBO 表示を見なくても気づけるように）
-  if (combo >= 1 && running && !gameOver) {
-    const T = comboTier();
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / T.rate);
-    const a = (0.16 + pulse * 0.26) * Math.min(1, 0.4 + T.power * 0.4);
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const bw = 26 + T.power * 8;
-    const bands = [
-      [0, 0, canvas.width, bw, 0, 0, 0, bw],
-      [0, canvas.height - bw, canvas.width, bw, 0, canvas.height, 0, canvas.height - bw],
-      [0, 0, bw, canvas.height, 0, 0, bw, 0],
-      [canvas.width - bw, 0, bw, canvas.height, canvas.width, 0, canvas.width - bw, 0],
-    ];
-    for (const [x, y, w, h, gx0, gy0, gx1, gy1] of bands) {
-      const g = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
-      g.addColorStop(0, rgbaOf(T.halo, a));
-      g.addColorStop(1, rgbaOf(T.halo, 0));
-      ctx.fillStyle = g;
-      ctx.fillRect(x, y, w, h);
-    }
-    ctx.restore();
   }
 
   // パーティクル等
