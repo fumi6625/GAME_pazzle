@@ -2156,10 +2156,9 @@ function dragStepPx() {
   return cellPx() * DRAG_CELLS_PER_COL;
 }
 
-const dragZone = document.getElementById("dragzone");
-// 盤面とドラッグ領域は同じジェスチャを受ける。指がコマを隠さないよう、
-// 実際の操作は盤面下の領域で行えるようにしてある。
-const gestureTargets = [canvas, dragZone].filter(Boolean);
+// 左右移動はボタンで行うので、ジェスチャを受けるのは盤面だけにする
+// （タップ＝回転 / 上下スワイプ＝落下。横ドラッグも補助として残してある）。
+const gestureTargets = [canvas];
 
 function onGestureDown(e) {
   if (e.pointerType !== "touch") return;
@@ -2220,25 +2219,42 @@ gestureTargets.forEach((el) => {
     rotateCW: () => rotate(1),
     rotateCCW: () => rotate(-1),
     hardDrop: () => hardDrop(),
+    left: () => move(-1),
+    right: () => move(1),
     burst: () => triggerBurst(),
     slow: () => triggerSlow(),
     pause: () => { if (!gameOver) paused = !paused; },
     mute: () => GameAudio.toggleMute(),
   };
+  // 左右ボタンだけは押しっぱなしで連続移動する。
+  // 値はゲームパッドの DAS/ARR と揃えてあるので、持ち替えても感覚が変わらない。
+  const REPEAT = { left: true, right: true };
   const stopRepeat = () => {
     clearTimeout(repeatDelay); clearInterval(repeatTimer);
     repeatDelay = repeatTimer = null;
   };
 
-  // ボタンは画面上端(.toptouch)と下部(#touchpad)に分かれているので document で受ける
+  // ボタンは画面上端(.toptouch)・盤面下(#movepad)・下部(#touchpad)に分かれているので
+  // document でまとめて受ける
   document.addEventListener("pointerdown", (e) => {
-    const btn = e.target.closest && e.target.closest(".tbtn");
+    const btn = e.target.closest && e.target.closest(".tbtn, .mbtn");
     if (!btn) return;
     e.preventDefault();
     const act = btn.getAttribute("data-act");
     if (!running) { startGame(); return; }
     if (act === "softDrop") { touchSoftDrop = true; return; }
-    if (fire[act]) fire[act]();
+    if (!fire[act]) return;
+    fire[act]();
+    // 押しっぱなしのリピート（DAS で溜めてから ARR 間隔で繰り返す）
+    if (REPEAT[act]) {
+      stopRepeat();
+      repeatDelay = setTimeout(() => {
+        repeatTimer = setInterval(() => {
+          if (!running || gameOver || paused) { stopRepeat(); return; }
+          fire[act]();
+        }, PAD_ARR);
+      }, PAD_DAS);
+    }
   }, { passive: false });
 
   const release = () => { stopRepeat(); touchSoftDrop = false; };
