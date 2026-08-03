@@ -1033,14 +1033,15 @@ kbd {
   .stat-grid { flex: 1 1 auto; gap: 10px; }
   .stat-grid .stat-value { font-size: 14px; }
   .burst-wrap { gap: 5px; }
-  .movepad { gap: 8px; margin-top: 8px; }
-  .mbtn { min-height: 90px; font-size: 56px; }
+  /* 盤面が「待機2行 + 盤面10行」で背が高くなったぶん、操作系を詰める */
+  .movepad { gap: 7px; margin-top: 7px; }
+  .mbtn { min-height: 76px; font-size: 48px; }
   .touchpad { gap: 6px; margin-top: 6px; }
-  .tbtn { min-height: 44px; font-size: 18px; }
+  .tbtn { min-height: 40px; font-size: 18px; }
   /* 上から 回転 → 即落下 → BURST。回転を最大に取る（.tbtn の指定を上書き） */
-  .tbtn-rot { min-height: 94px; font-size: 44px; }
-  .tbtn-hard { min-height: 62px; font-size: 30px; }
-  .tbtn-a, .tbtn-b { min-height: 46px; font-size: 12px; }
+  .tbtn-rot { min-height: 82px; font-size: 38px; }
+  .tbtn-hard { min-height: 54px; font-size: 26px; }
+  .tbtn-a, .tbtn-b { min-height: 42px; font-size: 11px; }
   /* 操作がボタンになったので、縦持ちでは説明文を畳んで高さを操作系に回す */
   .foot { display: none; }
   /* NOW PLAYING は1行に詰める */
@@ -1092,9 +1093,11 @@ kbd {
 
   .topbar, .board-top, .board-wrap { flex: 0 0 auto; }
   .board-wrap { padding: 4px; display: flex; align-items: center; justify-content: center; }
-  /* 盤面は画面上部に寄せ、下側にドラッグ用の余白を必ず残す */
+  /* 盤面は画面上部に寄せ、下側に移動ボタンの場所を必ず残す。
+     キャンバスが「待機2行 + 盤面10行」で背が高くなったので、
+     同じ高さでも横幅が狭くなる。少しだけ高さを譲って幅を稼ぐ。 */
   #board { width: auto; height: auto; max-width: 100%;
-           max-height: min(calc(100dvh - 148px), 58dvh); }
+           max-height: min(calc(100dvh - 136px), 62dvh); }
   .board-top { margin-bottom: 3px; padding-bottom: 3px; gap: 18px; border-bottom: 0; }
   .lvbar-head { gap: 6px; }
   .level-next { font-size: 8px; }

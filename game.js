@@ -14,7 +14,11 @@
 // ===== 定数 =====
 const COLS = 16;
 const ROWS = 10;
-const CELL = 40; // 640x400
+const CELL = 40;
+// 盤面の上に確保する「待機エリア」の行数。
+// 参考動画（スクリーン録画）のとおり、落ちる前のコマは盤面の枠外で待つ。
+// ここが無いと待機中のコマが見えず、待つ意味が無くなる。
+const PAD_ROWS = 2;   // キャンバスは 640 x 480（待機2行 + 盤面10行）
 
 const EMPTY = 0;
 const COLOR_A = 1;
@@ -30,15 +34,26 @@ const COLORS = {
 // 参考動画（ルミネス リマスター）のタイムラインは 16列 = 3.94秒 = ちょうど2小節で、
 // 盤面の進行が完全に曲に乗っている。落下も同じ考え方で拍に紐づけておくと、
 // 曲の BPM が変わっても「音楽的な落ち方」が崩れない。
-const GRAVITY_BEATS = 1.5;      // レベル1: 1行落ちるのに1.5拍（135BPM で約667ms）
-const MIN_GRAVITY_BEATS = 0.5;  // 下限: 1行 = 8分音符
-const SOFT_DROP_INTERVAL = 45;
+
 
 // ===== 出現してから落ち始めるまでの待ち =====
 // ルミネスは新しいコマが出ても、しばらくその場に留まってから落ち始める。
 // レベルが上がっても縮まない固定時間にしてあるので、盤面がどれだけ速くなっても
 // 「置き場所を考える間」だけは必ず残る。ソフトドロップ/即落下で打ち切れる。
-const SPAWN_HOLD_BEATS = 1.0;   // 1拍ぶん（96BPM で 0.625秒 / 120BPM で 0.5秒）
+
+// ===== 落ちる前の待機 =====
+// スクリーン録画（ルミネス リマスター / スマホ版・40秒）の実測:
+//   ・タイムラインの1周 = 3.600 秒（40秒間ずっと一定。残差 1.4%）
+//   ・コマは盤面の枠外で待機し、そこで移動も回転もできる
+//   ・待機時間は 3.60 / 3.72 / 3.87 / 3.90 / 4.07 / 4.23 / 4.95 秒
+//     → 最短 3.60秒 = 掃引ちょうど1周。長い側はプレイヤーが粘っているぶん
+//   ・解放後は 0.2 秒以内に着地する速い落下
+// つまり「掃引1周ぶん枠外で組み立てて、決めたら一気に落とす」ゲーム。
+// 待機は掃引と同じ拍数で持つので、曲のテンポが変われば一緒に変わる。
+const HOLD_BEATS = 8.0;         // 掃引1周 = 2小節 = 8拍
+const HOLD_MIN_BEATS = 3.0;     // レベルで縮む下限
+const HOLD_LEVEL_STEP = 0.955;  // レベルごとに待機が縮む（難度の主軸）
+const DROP_INTERVAL = 42;       // ms/行: 解放後の落下（実測どおり速く）
 
 // ===== 接地してから固定されるまでの猶予（ロックディレイ）=====
 // テトリスと同じく、着地しても少しのあいだは動かせる。動かすか回すたびに
@@ -151,9 +166,11 @@ function randomCells() {
   }
   return cells;
 }
+// 盤面座標 → キャンバス座標。待機エリアの高さぶん下にずれる。
 function cellCenter(x, y) {
-  return { cx: x * CELL + CELL / 2, cy: y * CELL + CELL / 2 };
+  return { cx: x * CELL + CELL / 2, cy: (y + PAD_ROWS) * CELL + CELL / 2 };
 }
+const padY = () => PAD_ROWS * CELL;
 function colPan(x) { return (x / (COLS - 1)) * 1.6 - 0.8; }
 
 // ===== レベル =====
@@ -161,15 +178,18 @@ function colPan(x) { return (x / (COLS - 1)) * 1.6 - 0.8; }
 // 落下間隔がわずかに縮んで難度が上がる。
 function levelNeed(l) { return LEVEL_BASE + (l - 1) * LEVEL_STEP; }
 function levelMult() { return 1 + (level - 1) * LEVEL_MULT; }
-// 1行落ちるのに何拍かけるか → ms に直す。曲が止まっている間も破綻しないよう
-// secondsPerBeat が取れないときは 135BPM 相当にフォールバックする。
-function gravityBeats() {
-  return Math.max(MIN_GRAVITY_BEATS, GRAVITY_BEATS * Math.pow(LEVEL_SPEEDUP, level - 1));
+// 曲が止まっている間も破綻しないよう、secondsPerBeat が取れないときは
+// 96BPM 相当にフォールバックする。
+function spbNow() {
+  return (typeof GameAudio !== "undefined" && GameAudio.secondsPerBeat) || 60 / 96;
 }
-function gravityInterval() {
-  const spb = (typeof GameAudio !== "undefined" && GameAudio.secondsPerBeat) || 60 / 135;
-  return gravityBeats() * spb * 1000;
+// 枠外で待てる時間。レベルが上がるほど短くなり、これが難度の主軸になる。
+function holdBeats() {
+  return Math.max(HOLD_MIN_BEATS, HOLD_BEATS * Math.pow(HOLD_LEVEL_STEP, level - 1));
 }
+function holdMs() { return holdBeats() * spbNow() * 1000; }
+// 解放後の落下間隔。実測では一瞬で着地するので、見える範囲で速くする。
+function gravityInterval() { return DROP_INTERVAL; }
 function checkLevelUp() {
   let rose = false;
   while (level < MAX_LEVEL && score >= nextLevelAt) {
@@ -731,15 +751,14 @@ function init() {
 // ===== ピース生成 =====
 function spawnPiece() {
   const startX = Math.floor(COLS / 2) - 1;
-  // 盤面の中に出す。以前は盤面の上（y=-2）に出していたが、
-  // それだと「落ち始めるまでの待ち」の間コマが見えず、待ちの意味がない。
-  current = { x: startX, y: 0, cells: nextQueue.shift() };
+  // 盤面の枠外（待機エリア）に出す。参考動画のとおり、
+  // 落ちる前のコマは盤面の外で待ち、そこで置き場所を決める。
+  current = { x: startX, y: -PAD_ROWS, cells: nextQueue.shift() };
   lockTimer = 0; lockResets = 0; lockLowest = -99;
-  const spb = (typeof GameAudio !== "undefined" && GameAudio.secondsPerBeat) || 60 / 96;
-  holdTimer = SPAWN_HOLD_BEATS * spb * 1000;
+  holdTimer = holdMs();
   while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   drawNext();
-  // 出す場所が塞がっていたら終了
+  // 盤面の一番上が塞がっていたら終了（待機エリアには常に置ける）
   if (collides(startX, 0, current.cells)) endGame();
 }
 
@@ -809,7 +828,7 @@ function hardDrop() {
     GameAudio.playDrop();
     // 落下の軌跡（残像トレイル）
     const { cx } = cellCenter(current.x + 0.5, 0);
-    Effects.column(cx, CELL * 2, (current.y + 2) * CELL, "rgba(200,240,255,ALPHA)");
+    Effects.column(cx, CELL * 2, (current.y + 2 + PAD_ROWS) * CELL, "rgba(200,240,255,ALPHA)");
   }
   lockPiece();
 }
@@ -1061,7 +1080,7 @@ function advanceTimeline() {
       Effects.ring(cx, cy, col.glow, CELL * 1.5);
       GameAudio.playClear(i, cell.y, pan);
     });
-    Effects.column(c * CELL + CELL / 2, CELL, ROWS * CELL,
+    Effects.column(c * CELL + CELL / 2, CELL, (ROWS + PAD_ROWS) * CELL,
       "rgba(190,225,255,ALPHA)");
     Effects.screenFlash(0.1 + Math.min(0.3, sweepCleared * 0.025));
     padRumble(0.12 + Math.min(0.4, cleared.length * 0.07), 0.3, 70);
@@ -1167,7 +1186,7 @@ function triggerSlow() {
   Effects.banner("CHRONO", "#7fe9ff",
     "タイムライン減速 " + SLOW_DURATION + "秒  /  大きな正方形を組め");
   Effects.screenFlash(0.5);
-  Effects.zone(0, 0, COLS * CELL, ROWS * CELL, "rgba(120,230,255,0.22)");
+  Effects.zone(0, padY(), COLS * CELL, ROWS * CELL, "rgba(120,230,255,0.22)");
   for (let i = 0; i < 4; i++)
     Effects.ring(canvas.width / 2, canvas.height / 2, "#7fe9ff", canvas.width * (0.3 + i * 0.22));
   GameAudio.playSlow();
@@ -1204,7 +1223,7 @@ function triggerBurst() {
   }
 
   // 薙ぎ払う領域を明示（何が起きたのか分かるように）
-  Effects.zone(0, (ROWS - BURST_ROWS) * CELL, COLS * CELL, BURST_ROWS * CELL,
+  Effects.zone(0, padY() + (ROWS - BURST_ROWS) * CELL, COLS * CELL, BURST_ROWS * CELL,
     "rgba(255,92,240,0.30)");
 
   let bigBonus = 0;
@@ -1395,18 +1414,49 @@ function drawCell(c, x, y, color, size, opts = {}) {
   }
 }
 
+// 待機エリア（盤面の枠外）。ここに落ちる前のコマが浮いている。
+function drawHoldArea() {
+  const w = COLS * CELL, h = padY();
+  const sk = isRemaster() ? Effects.skin() : null;
+  ctx.save();
+  // 盤面より暗くして「外側」だと分かるようにする
+  ctx.fillStyle = sk
+    ? `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.34)`
+    : "rgba(6,8,18,0.30)";
+  ctx.fillRect(0, 0, w, h);
+  // 盤面との境界。ここを越えたら固定されるという線。
+  const line = sk ? `rgba(${sk.line[0]},${sk.line[1]},${sk.line[2]},0.55)`
+                  : "rgba(140,210,255,0.45)";
+  ctx.strokeStyle = line;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([7, 6]);
+  ctx.beginPath(); ctx.moveTo(0, h - 1); ctx.lineTo(w, h - 1); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
 function render() {
   const shk = Effects.getShake();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(shk.x, shk.y);
 
+  // --- 待機エリア（盤面の枠外）---
+  // ここに落ちる前のコマが浮いている。盤面とは明るさで区別し、
+  // 下端に境界線を引いて「ここから下が盤面」と分かるようにする。
+  drawHoldArea();
+
+  // 以降は盤面座標のまま描く。待機エリアぶんだけ原点を下げておくので、
+  // y = -2..-1 のコマ（＝待機中）は自然に枠外へ描かれる。
+  ctx.save();
+  ctx.translate(0, padY());
+
   if (isRemaster()) {
     // REMASTER: 盤面は「半透明の暗いパネル + セル全部を区切る細いグリッド」。
     // 参考動画と同じく、空きマスの位置が常に読めるようにする。
     const sk = Effects.skin();
     ctx.fillStyle = `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.62)`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, COLS * CELL, ROWS * CELL);
     ctx.strokeStyle = `rgba(${sk.grid[0]},${sk.grid[1]},${sk.grid[2]},0.13)`;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -1416,7 +1466,7 @@ function render() {
   } else {
     // 盤面のうっすら暗幕
     ctx.fillStyle = "rgba(8,10,26,0.42)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, COLS * CELL, ROWS * CELL);
 
     // グリッド（微細ドット）
     ctx.fillStyle = "rgba(255,255,255,0.06)";
@@ -1487,14 +1537,14 @@ function render() {
         }
       ctx.restore();
     }
-    // 出現直後の待ち。残り時間をコマの上の細いバーで示す。
+    // 待機の残り時間。コマの真下に横棒で出す（枠外にいるので盤面を邪魔しない）。
     if (holdTimer > 0) {
-      const spb = (typeof GameAudio !== "undefined" && GameAudio.secondsPerBeat) || 60 / 96;
-      const full = SPAWN_HOLD_BEATS * spb * 1000;
+      const full = holdMs();
       const w = 2 * CELL * (holdTimer / full);
-      const py = Math.max(0, current.y) * CELL;
-      ctx.fillStyle = "rgba(140,255,216,0.85)";
-      ctx.fillRect(current.x * CELL, py, w, 3);
+      const py = (current.y + 2) * CELL - 4;
+      ctx.fillStyle = holdTimer / full < 0.25
+        ? "rgba(255,150,90,0.95)" : "rgba(140,255,216,0.9)";
+      ctx.fillRect(current.x * CELL, py, w, 4);
     }
 
     // 接地中は、固定までの残り時間が分かるように白く明滅させる。
@@ -1615,7 +1665,9 @@ function render() {
     ctx.restore();
   }
 
-  // パーティクル等
+  ctx.restore();      // 盤面座標の終わり
+
+  // パーティクル等（cellCenter がすでに待機エリアぶんを含むのでそのまま）
   Effects.drawForeground(ctx, canvas.width, canvas.height);
 
   // 危険時の赤ビネット
@@ -1754,12 +1806,13 @@ function loop(now) {
     elapsedMs = now - startTimeMs;
 
     // 重力
-    // 出現直後の待ち。この間は落ちないが、移動と回転はできる。
-    // 下入力があれば待たずに落とす（待たされる感じにしないため）。
+    // 枠外での待機。この間は落ちないが、移動と回転はできる。
+    // 下入力で待たずに落とせる（自分のタイミングで置けるようにする）。
     if (current && holdTimer > 0) {
       if (softDrop || padSoftDrop || touchSoftDrop) holdTimer = 0;
       else holdTimer = Math.max(0, holdTimer - dt * 1000);
       if (holdTimer > 0) gravityTimer = 0;
+      else GameAudio.playDrop();                 // 落ち始めた合図
     }
 
     // 重力と接地。接地している間は落とさず、猶予を数えて時間切れで固定する。
@@ -1771,9 +1824,10 @@ function loop(now) {
       } else {
         lockTimer = 0;
         gravityTimer += dt * 1000;
-        const gi = (softDrop || padSoftDrop || touchSoftDrop)
-          ? SOFT_DROP_INTERVAL : gravityInterval();
-        if (gravityTimer >= gi) { gravityTimer = 0; stepDown(); }
+        const gi = gravityInterval();
+        // 1フレームで複数行ぶん進むことがあるのでまとめて処理する
+        while (gravityTimer >= gi && stepDown()) gravityTimer -= gi;
+        if (gravityTimer >= gi) gravityTimer = 0;
       }
     }
 
@@ -2378,13 +2432,14 @@ window.LUMINA = {
   get maxCombo() { return maxCombo; },
   get lockTimer() { return lockTimer; },
   get holdTimer() { return holdTimer; },
-  get holdFull() { return SPAWN_HOLD_BEATS * ((typeof GameAudio!=='undefined' && GameAudio.secondsPerBeat) || 60/96) * 1000; },
+  get holdFull() { return holdMs(); },
   get chain() { return chain; },
   get chainWave() { return chainWave; },
   pieceChain() { return current ? (current.cells.chain || null) : null; },
   setChain(x, y, on) { chain[y][x] = !!on; },
   markNow() { return markMatches(); },
   hardDropNow() { hardDrop(); },
+  releaseHold() { holdTimer = 0; },
   get lockResets() { return lockResets; },
   lockConst() { return { delay: LOCK_DELAY, max: LOCK_RESET_MAX }; },
   stepDown() { return current ? stepDown() : false; },
@@ -2402,7 +2457,8 @@ window.LUMINA = {
   get timelineCol() { return timelineCol; },
   get theme() { return themeId; },
   get tutStep() { return tutStep; },
-  get gravityBeats() { return gravityBeats(); },
+  get holdBeats() { return holdBeats(); },
+  get holdMs() { return holdMs(); },
   setTheme,
   startTutorial() { startTutorial(); },
   pieceX() { return current ? current.x : null; },
@@ -2456,12 +2512,12 @@ function tutBoard(fn) {
 
 const TUT_STEPS = [
   {
-    title: "動かす・回す",
-    body: "落ちてくるのは 2色 4マスのコマ。左右で列を選び、回転で 4マスの色の並びを変えます。"
-        + "着地しても少しのあいだは動かせて、動かすか回すたびに固定までの猶予が延びます"
-        + "（延ばせるのは15回まで）。急いで置かず、置き場所を作り直せます。"
-        + "（スマホは盤面の下をドラッグ＝移動、タップ＝右回転）",
-    goal: "左右に動かして、1回まわしてみましょう",
+    title: "枠の外で組み立てる",
+    body: "コマは盤面の外側（点線より上）で待ちます。待っているあいだに左右へ動かし、"
+        + "回して 4マスの色の並びを決めます。待ち時間が切れると一気に落ちます"
+        + "（下入力・即落下で自分から落とすこともできます）。"
+        + "着地後も動かす／回すたびに固定が少し延びます（15回まで）。",
+    goal: "枠の外にいるうちに、左右に動かして1回まわしてみましょう",
     freeze: true,
     setup() { tutBoard(() => EMPTY); },
     done() { return tutSeen.moved && tutSeen.rotated; },
