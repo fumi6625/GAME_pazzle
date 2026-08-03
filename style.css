@@ -804,8 +804,10 @@ kbd {
     gap: 8px;
     width: 100%;
   }
-  /* 左右移動は盤面の下に大きく2分割で置く */
-  .movepad { display: flex; gap: 8px; width: 100%; margin-top: 8px; }
+  /* 左右移動は盤面の下、中央に寄せて2分割で置く。
+     盤面いっぱいに広げると指の移動が大きくなりすぎるので、
+     幅は盤面のおよそ半分に抑える（残りは盤面の表示に回す）。 */
+  .movepad { display: flex; gap: 8px; width: 52%; margin: 8px auto 0; }
   /* 一時停止・ミュートは画面上端に隔離（誤操作防止） */
   .toptouch { display: flex; gap: 6px; }
   .foot-touch { display: inline; }
@@ -938,7 +940,7 @@ kbd {
 .tut-goal.done { color: #6ef2b0; }
 
 /* ===== 左右移動ボタン ===== */
-/* 盤面の下の幅をそのまま2分割する。押す面積を最大に取りたいので余白は最小。
+/* 盤面の下の中央に、盤面の半分ほどの幅で2分割して置く。
    既定は非表示で、タッチ端末でのみ出す。長押しで連続移動する。 */
 .mbtn {
   -webkit-appearance: none;
@@ -981,19 +983,31 @@ kbd {
 /* スマホ（縦持ち）: 盤面を画面幅いっぱいに広げ、HUD を1行に畳む */
 @media (max-width: 560px) {
   .stage { align-items: flex-start; height: 100dvh; }
+  /* 盤面をできるだけ大きく見せたいので、左右の余白は最小にする。
+     縦は「操作系の高さを先に確保し、余りを全部盤面に渡す」フレックスにする。
+     こうしておくと画面が短い端末でもボタンがはみ出さず、
+     広い端末では盤面が自動でいっぱいまで育つ。 */
   .game-area {
-    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    height: 100dvh;
+    display: flex;
   }
-  .layout { flex-direction: column; gap: 10px; }
-  .main { width: 100%; }
+  /* nowrap は必須: 高さが決まった縦フレックスに wrap が残っていると、
+     入りきらない操作列が「2列目」に回り込んで盤面に重なる。 */
+  .layout { flex-direction: column; flex-wrap: nowrap; gap: 8px;
+            flex: 1 1 auto; min-height: 0; width: 100%; }
+  .main { width: 100%; flex: 1 1 auto; min-height: 0;
+          display: flex; flex-direction: column; }
+  .topbar, .board-top, .movepad, .hud, .touchpad { flex: 0 0 auto; }
   .topbar { margin-bottom: 8px; }
   .logo-a, .logo-b { font-size: 17px; letter-spacing: 0.22em; }
   .tagline { display: none; }
-  .board-wrap { padding: 6px; }
+  .board-wrap { padding: 3px; flex: 1 1 auto; min-height: 0;
+                display: flex; align-items: center; justify-content: center; }
   .frame-tick { display: none; }
 
-  /* 盤面は 640x400（16:10）。画面幅に合わせて縮める */
-  #board { width: 100%; height: auto; }
+  /* 盤面は 640x480（4:3）。幅と高さの空きぶんまで、比率を保って広がる */
+  #board { width: auto; height: auto; max-width: 100%; max-height: 100%; }
 
   .board-top { gap: 10px; margin-bottom: 6px; padding-bottom: 6px; }
   .level-value { font-size: 20px; }
@@ -1034,7 +1048,7 @@ kbd {
   .stat-grid .stat-value { font-size: 14px; }
   .burst-wrap { gap: 5px; }
   /* 盤面が「待機2行 + 盤面10行」で背が高くなったぶん、操作系を詰める */
-  .movepad { gap: 7px; margin-top: 7px; }
+  .movepad { gap: 7px; margin: 7px auto 0; width: 54%; }
   .mbtn { min-height: 76px; font-size: 48px; }
   .touchpad { gap: 6px; margin-top: 6px; }
   .tbtn { min-height: 40px; font-size: 18px; }
@@ -1053,6 +1067,40 @@ kbd {
   .cfg-inner { padding: 16px; }
   .rank-panel { width: 100%; }
   .rank-list { max-height: 34vh; }
+}
+
+/* 縦が短い端末（小型 Android / iPhone SE）は情報の段とボタンを一段詰めて、
+   浮いた高さをまるごと盤面に回す。盤面はフレックスで残りを全部使う。 */
+@media (max-width: 560px) and (max-height: 800px) {
+  .logo-a, .logo-b { font-size: 14px; letter-spacing: 0.18em; }
+  .topbar { margin-bottom: 4px; }
+  .track-wrap { display: none; }
+  .stat-hero .stat-value { font-size: 18px; }
+  .stat-grid .stat-value { font-size: 12px; }
+  .hud { gap: 4px 10px; }
+  .next-inline #next { width: 88px; height: 48px; }
+  .movepad { margin-top: 5px; }
+  .mbtn { min-height: 62px; font-size: 40px; }
+  .touchpad { gap: 5px; margin-top: 5px; }
+  .tbtn-rot { min-height: 66px; font-size: 30px; }
+  .tbtn-hard { min-height: 44px; font-size: 22px; }
+  .tbtn-a, .tbtn-b { min-height: 34px; font-size: 10px; }
+}
+
+/* さらに短い端末（667px 級）。スコアまわりを1行に畳む。 */
+@media (max-width: 560px) and (max-height: 700px) {
+  .logo { display: none; }
+  .stat-hero { flex: 0 0 auto; }
+  .stat-hero .stat-value { font-size: 16px; }
+  .stat-hero .stat-label, .stat-grid .stat-label { font-size: 7px; }
+  .stat { padding-top: 3px; }
+  .burst-wrap { gap: 3px; }
+  .burst-ready, .slow-left { font-size: 8px; }
+  .next-inline #next { width: 74px; height: 40px; }
+  .mbtn { min-height: 54px; font-size: 34px; }
+  .tbtn-rot { min-height: 56px; font-size: 26px; }
+  .tbtn-hard { min-height: 38px; font-size: 20px; }
+  .tbtn-a, .tbtn-b { min-height: 30px; font-size: 9px; }
 }
 
 /* 横持ちの指定は後段のレスポンシブ指定より優先させたいので、ファイル末尾に置く */
@@ -1092,12 +1140,12 @@ kbd {
               align-content: center; gap: 7px; }
 
   .topbar, .board-top, .board-wrap { flex: 0 0 auto; }
-  .board-wrap { padding: 4px; display: flex; align-items: center; justify-content: center; }
-  /* 盤面は画面上部に寄せ、下側に移動ボタンの場所を必ず残す。
-     キャンバスが「待機2行 + 盤面10行」で背が高くなったので、
-     同じ高さでも横幅が狭くなる。少しだけ高さを譲って幅を稼ぐ。 */
-  #board { width: auto; height: auto; max-width: 100%;
-           max-height: min(calc(100dvh - 136px), 62dvh); }
+  /* 縦持ちと同じく「余った高さを丸ごと盤面に渡す」。移動ボタンの高さは
+     先に確保されるので、盤面がボタンを押し出すことがない。 */
+  /* align-self:center で枠が盤面の幅にぴったり縮む（横に伸びた枠を防ぐ） */
+  .board-wrap { padding: 2px; flex: 1 1 auto; min-height: 0; align-self: center;
+                display: flex; align-items: center; justify-content: center; }
+  #board { width: auto; height: auto; max-width: 100%; max-height: 100%; }
   .board-top { margin-bottom: 3px; padding-bottom: 3px; gap: 18px; border-bottom: 0; }
   .lvbar-head { gap: 6px; }
   .level-next { font-size: 8px; }
@@ -1119,13 +1167,16 @@ kbd {
   .tut-title { font-size: 11px; }
   .tut-body { margin-top: 3px; font-size: 10px; line-height: 1.45; }
   .tut-goal { margin-top: 4px; font-size: 10px; }
-  /* 左右移動: 盤面より下の空きを丸ごと2分割して使う */
+  /* 左右移動: 盤面より下の空きを縦いっぱいに使い、幅は中央の半分だけ取る。
+     横に広げても指の移動が増えるだけなので、余った幅は盤面に回す。 */
   .movepad {
     display: flex;
     gap: 8px;
-    flex: 1 1 auto;
-    min-height: 62px;
-    margin-top: 6px;
+    flex: 0 0 auto;
+    width: 54%;
+    align-self: center;
+    height: 58px;
+    margin-top: 5px;
   }
   .mbtn { font-size: 48px; }
   .next-inline #next { width: 74px; height: 40px; }

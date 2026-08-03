@@ -53,7 +53,18 @@ const COLORS = {
 const HOLD_BEATS = 8.0;         // 掃引1周 = 2小節 = 8拍
 const HOLD_MIN_BEATS = 3.0;     // レベルで縮む下限
 const HOLD_LEVEL_STEP = 0.955;  // レベルごとに待機が縮む（難度の主軸）
-const DROP_INTERVAL = 42;       // ms/行: 解放後の落下（実測どおり速く）
+
+// ===== 解放後の自然落下 =====
+// 同じ録画で、コマの上端を1フレーム(1/60秒)ずつ追って落下区間を切り出した実測:
+//   自然落下 … 122 / 128 / 128 / 148 / 151 / 178 ms/行（中央値およそ 150ms）
+//   即落下   … 6〜35 ms/行（プレイヤー操作。1〜3行落ちたあたりで押している）
+// 150ms は 96BPM の16分音符（1/4拍 = 156ms）にほぼ一致する。ばらつきも
+// 曲のテンポ差で説明がつくので、「16分で1行」として拍に紐づける。
+// こうしておけば曲が変わっても落下の手触りが音と揃う。
+const GRAVITY_BEATS = 0.25;      // 1行落ちるのにかかる拍数（16分音符）
+const GRAVITY_MIN_BEATS = 0.11;  // レベルで縮む下限
+const GRAVITY_LEVEL_STEP = 0.975;
+const SOFT_DROP_INTERVAL = 22;   // ms/行: ソフトドロップ中は一気に速くする
 
 // ===== 接地してから固定されるまでの猶予（ロックディレイ）=====
 // テトリスと同じく、着地しても少しのあいだは動かせる。動かすか回すたびに
@@ -188,8 +199,16 @@ function holdBeats() {
   return Math.max(HOLD_MIN_BEATS, HOLD_BEATS * Math.pow(HOLD_LEVEL_STEP, level - 1));
 }
 function holdMs() { return holdBeats() * spbNow() * 1000; }
-// 解放後の落下間隔。実測では一瞬で着地するので、見える範囲で速くする。
-function gravityInterval() { return DROP_INTERVAL; }
+// 解放後の落下間隔。実測どおり「16分音符で1行」を基準にし、レベルで少しずつ
+// 詰める。ソフトドロップ中だけは一定の速さで一気に落とす。
+function gravityBeats() {
+  return Math.max(GRAVITY_MIN_BEATS,
+                  GRAVITY_BEATS * Math.pow(GRAVITY_LEVEL_STEP, level - 1));
+}
+function gravityInterval() {
+  if (softDrop || padSoftDrop || touchSoftDrop) return SOFT_DROP_INTERVAL;
+  return gravityBeats() * spbNow() * 1000;
+}
 function checkLevelUp() {
   let rose = false;
   while (level < MAX_LEVEL && score >= nextLevelAt) {
@@ -1551,11 +1570,13 @@ function render() {
     // 残りが少ないほど速く点滅するので「そろそろ固まる」が体で分かる。
     const lockT = lockTimer > 0 ? Math.min(1, lockTimer / LOCK_DELAY) : 0;
     const cm = current.cells.chain;
+    // 待機中は y = -2..-1 にいる。原点を待機エリアぶん下げてあるので
+    // そのまま描けば枠外に出る。-PAD_ROWS まで描かないと待機中のコマが消える。
     for (let r = 0; r < 2; r++)
       for (let c = 0; c < 2; c++) {
         const by = current.y + r;
-        if (by >= 0) drawCell(ctx, current.x + c, by, current.cells[r][c], CELL,
-                              { chain: !!(cm && cm[0] === r && cm[1] === c) });
+        if (by >= -PAD_ROWS) drawCell(ctx, current.x + c, by, current.cells[r][c], CELL,
+                                      { chain: !!(cm && cm[0] === r && cm[1] === c) });
       }
     if (lockT > 0) {
       const blink = 0.5 + 0.5 * Math.sin(performance.now() / (60 + (1 - lockT) * 150));
@@ -2442,6 +2463,8 @@ window.LUMINA = {
   releaseHold() { holdTimer = 0; },
   get lockResets() { return lockResets; },
   lockConst() { return { delay: LOCK_DELAY, max: LOCK_RESET_MAX }; },
+  gravityMs() { return gravityInterval(); },
+  get gravityBeat() { return gravityBeats(); },
   stepDown() { return current ? stepDown() : false; },
   rotate(d) { rotate(d); },
   move(d) { move(d); },
