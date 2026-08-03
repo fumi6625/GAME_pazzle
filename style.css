@@ -792,7 +792,7 @@ kbd {
 
 /* ===== タッチ操作 ===== */
 /* 既定は非表示。粗いポインタ（スマホ・タブレット）でのみ出す。 */
-.touchpad, .toptouch { display: none; }
+.touchpad, .toptouch, .movepad { display: none; }
 .foot-touch { display: none; }
 
 .topbar-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -804,6 +804,8 @@ kbd {
     gap: 8px;
     width: 100%;
   }
+  /* 左右移動は盤面の下に大きく2分割で置く */
+  .movepad { display: flex; gap: 8px; width: 100%; margin-top: 8px; }
   /* 一時停止・ミュートは画面上端に隔離（誤操作防止） */
   .toptouch { display: flex; gap: 6px; }
   .foot-touch { display: inline; }
@@ -935,17 +937,27 @@ kbd {
 }
 .tut-goal.done { color: #6ef2b0; }
 
-/* ===== ドラッグ領域 ===== */
-/* 盤面の下に置く親指用のスペース。ここを触っても指がコマにかからない。
-   既定は非表示で、横持ちのタッチ端末でのみ出す。 */
-.dragzone { display: none; }
-.dragzone-hint {
-  font-family: var(--ui);
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  color: var(--dim-2);
-  pointer-events: none;
+/* ===== 左右移動ボタン ===== */
+/* 盤面の下の幅をそのまま2分割する。押す面積を最大に取りたいので余白は最小。
+   既定は非表示で、タッチ端末でのみ出す。長押しで連続移動する。 */
+.mbtn {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 56px;
+  font-weight: 300;
+  line-height: 1;
+  color: var(--accent);
+  background: rgba(92, 228, 255, 0.09);
+  border: 1px solid rgba(92, 228, 255, 0.45);
+  border-radius: 10px;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: background 0.07s, transform 0.07s;
 }
+.mbtn:active { background: rgba(92, 228, 255, 0.32); transform: scale(0.98); }
 
 
 /* ===== レスポンシブ ===== */
@@ -1021,12 +1033,20 @@ kbd {
   .stat-grid { flex: 1 1 auto; gap: 10px; }
   .stat-grid .stat-value { font-size: 14px; }
   .burst-wrap { gap: 5px; }
-  .touchpad { gap: 7px; margin-top: 6px; }
+  .movepad { gap: 8px; margin-top: 8px; }
+  .mbtn { min-height: 90px; font-size: 56px; }
+  .touchpad { gap: 6px; margin-top: 6px; }
   .tbtn { min-height: 44px; font-size: 18px; }
-  /* 上から 即落下 → 回転 → BURST。回転を最大に取る（.tbtn の指定を上書き） */
-  .tbtn-hard { min-height: 72px; font-size: 34px; }
-  .tbtn-rot { min-height: 116px; font-size: 52px; }
-  .tbtn-a, .tbtn-b { min-height: 52px; font-size: 12px; }
+  /* 上から 回転 → 即落下 → BURST。回転を最大に取る（.tbtn の指定を上書き） */
+  .tbtn-rot { min-height: 94px; font-size: 44px; }
+  .tbtn-hard { min-height: 62px; font-size: 30px; }
+  .tbtn-a, .tbtn-b { min-height: 46px; font-size: 12px; }
+  /* 操作がボタンになったので、縦持ちでは説明文を畳んで高さを操作系に回す */
+  .foot { display: none; }
+  /* NOW PLAYING は1行に詰める */
+  .track-wrap { padding-top: 5px; }
+  .track-name { font-size: 10px; line-height: 1.3; }
+  .track-name small { font-size: 8px; }
   .tbtn-sm { min-height: 32px; font-size: 12px; }
   .overlay-title { font-size: 24px; }
   .cfg-inner { padding: 16px; }
@@ -1096,22 +1116,15 @@ kbd {
   .tut-title { font-size: 11px; }
   .tut-body { margin-top: 3px; font-size: 10px; line-height: 1.45; }
   .tut-goal { margin-top: 4px; font-size: 10px; }
-  body.tut-on .dragzone-hint { display: none; }
-
-  /* 親指ドラッグ領域: 盤面より下の左側スペースを全部使う */
-  .dragzone {
+  /* 左右移動: 盤面より下の空きを丸ごと2分割して使う */
+  .movepad {
     display: flex;
-    align-items: center;
-    justify-content: center;
+    gap: 8px;
     flex: 1 1 auto;
     min-height: 62px;
     margin-top: 6px;
-    border: 1px dashed rgba(92, 228, 255, 0.22);
-    border-radius: 10px;
-    background: linear-gradient(180deg, rgba(92, 228, 255, 0.05), rgba(92, 228, 255, 0.012));
-    touch-action: none;
   }
-  .dragzone:active { background: rgba(92, 228, 255, 0.12); }
+  .mbtn { font-size: 48px; }
   .next-inline #next { width: 74px; height: 40px; }
   .level-value { font-size: 14px; }
 

@@ -34,6 +34,12 @@ const GRAVITY_BEATS = 1.5;      // レベル1: 1行落ちるのに1.5拍（135BP
 const MIN_GRAVITY_BEATS = 0.5;  // 下限: 1行 = 8分音符
 const SOFT_DROP_INTERVAL = 45;
 
+// ===== 出現してから落ち始めるまでの待ち =====
+// ルミネスは新しいコマが出ても、しばらくその場に留まってから落ち始める。
+// レベルが上がっても縮まない固定時間にしてあるので、盤面がどれだけ速くなっても
+// 「置き場所を考える間」だけは必ず残る。ソフトドロップ/即落下で打ち切れる。
+const SPAWN_HOLD_BEATS = 1.0;   // 1拍ぶん（96BPM で 0.625秒 / 120BPM で 0.5秒）
+
 // ===== 接地してから固定されるまでの猶予（ロックディレイ）=====
 // テトリスと同じく、着地しても少しのあいだは動かせる。動かすか回すたびに
 // 猶予が리セットされるので、回し続けて固定を先延ばしにできる。
@@ -49,6 +55,16 @@ const LEVEL_STEP = 1600;        // 1レベル上がるごとの必要点の増�
 const LEVEL_MULT = 0.2;         // レベルごとの得点係数の増加（Lv1=x1.0, Lv5=x1.8）
 const LEVEL_SPEEDUP = 0.955;    // レベルごとの落下間隔（ほんの少しだけ速く）
 const MAX_LEVEL = 30;
+
+// ===== チェインブロック =====
+// 参考動画「How to Play」より:
+//   「チェインブロックを使って、同じ色のブロックを繋げて消そう。」
+//   落ちてくる4マスのうち1マスに印が付き、2x2 が成立して消える時に、
+//   そのマスと地続きになっている同色マスをまとめて消す。
+//   動画では印のマスを中心に、消去待ちの表示が外へ波状に広がっていく。
+const CHAIN_CHANCE = 0.16;      // 新しいコマにチェインブロックが混じる確率
+const CHAIN_WAVE = 0.045;       // 波が1マス進むのにかかる秒数
+const CHAIN_BONUS = 4;          // チェインで消したセル1個あたりの追加点
 
 // ===== 豪華コマ（3x3 以上の同色正方形） =====
 const BIG_MIN = 3;
@@ -66,6 +82,10 @@ let board, marked;
 // 消去のあと上のコマが落ちてくる見た目のためのオフセット（単位: マス）。
 // 論理座標はすでに落ちた後の位置で、描画だけを fallAnim ぶん上にずらして戻す。
 let fallAnim, fallVel;
+let chain;                      // そのマスがチェインブロックか
+let chainWave;                  // チェイン発動時の波の到達距離（マス）。表示用
+let chainWaveT = 0;             // 波の経過時間（秒）
+let chainCells = 0;             // 直近のチェインで巻き込んだセル数
 let bigSize, bigTop;            // 豪華コマ: 各セルが属する正方形の辺長 / 左上セルの辺長
 let current;
 // 先読みキュー。先頭が次、その次が次の次。2手先まで見えると組み立てを計画できる。
@@ -84,6 +104,7 @@ let timelineCol;
 let timelineBeat;
 
 let gravityTimer, lastTime;
+let holdTimer = 0;              // 出現してから落ち始めるまでの残り(ms)
 let lockTimer = 0;              // 接地してから経った時間(ms)
 let lockResets = 0;             // 猶予をリセットした回数
 let lockLowest = -99;           // このコマが到達した最も下の段
@@ -122,7 +143,13 @@ function makeGrid(fill) {
 }
 function randomCells() {
   const rnd = () => (Math.random() < 0.5 ? COLOR_A : COLOR_B);
-  return [[rnd(), rnd()], [rnd(), rnd()]];
+  const cells = [[rnd(), rnd()], [rnd(), rnd()]];
+  // 4マスのうち1マスだけを、たまにチェインブロックにする
+  cells.chain = null;
+  if (Math.random() < CHAIN_CHANCE) {
+    cells.chain = [Math.random() < 0.5 ? 0 : 1, Math.random() < 0.5 ? 0 : 1];
+  }
+  return cells;
 }
 function cellCenter(x, y) {
   return { cx: x * CELL + CELL / 2, cy: y * CELL + CELL / 2 };
@@ -662,6 +689,9 @@ function init() {
   marked = makeGrid(false);
   fallAnim = makeGrid(0);
   fallVel = makeGrid(0);
+  chain = makeGrid(false);
+  chainWave = makeGrid(-1);
+  chainWaveT = 0;
   bigSize = makeGrid(0);
   bigTop = makeGrid(0);
   score = 0;
@@ -701,13 +731,16 @@ function init() {
 // ===== ピース生成 =====
 function spawnPiece() {
   const startX = Math.floor(COLS / 2) - 1;
-  current = { x: startX, y: -2, cells: nextQueue.shift() };
+  // 盤面の中に出す。以前は盤面の上（y=-2）に出していたが、
+  // それだと「落ち始めるまでの待ち」の間コマが見えず、待ちの意味がない。
+  current = { x: startX, y: 0, cells: nextQueue.shift() };
   lockTimer = 0; lockResets = 0; lockLowest = -99;
+  const spb = (typeof GameAudio !== "undefined" && GameAudio.secondsPerBeat) || 60 / 96;
+  holdTimer = SPAWN_HOLD_BEATS * spb * 1000;
   while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   drawNext();
-  if (board[0][startX] !== EMPTY || board[0][startX + 1] !== EMPTY) {
-    endGame();
-  }
+  // 出す場所が塞がっていたら終了
+  if (collides(startX, 0, current.cells)) endGame();
 }
 
 // ===== 衝突判定 =====
@@ -749,6 +782,14 @@ function rotate(dir = 1) {
   const rotated = dir >= 0
     ? [[c[1][0], c[0][0]], [c[1][1], c[0][1]]]
     : [[c[0][1], c[1][1]], [c[0][0], c[1][0]]];
+  // チェインブロックの位置も一緒に回す。回すと印が消えてしまうのを防ぐ。
+  //   右回り: (r,c) → (c, 1-r)   左回り: (r,c) → (1-c, r)
+  if (c.chain) {
+    const [r0, c0] = c.chain;
+    rotated.chain = dir >= 0 ? [c0, 1 - r0] : [1 - c0, r0];
+  } else {
+    rotated.chain = null;
+  }
   if (!collides(current.x, current.y, rotated)) {
     current.cells = rotated;
     GameAudio.playRotate(dir);
@@ -763,7 +804,7 @@ function hardDrop() {
   if (!current || gameOver || paused) return;
   const from = current.y;
   while (!collides(current.x, current.y + 1, current.cells)) current.y++;
-  lockTimer = 0;
+  lockTimer = 0; holdTimer = 0;
   if (current.y > from) {
     GameAudio.playDrop();
     // 落下の軌跡（残像トレイル）
@@ -789,6 +830,8 @@ function lockPiece() {
       const bx = current.x + c, by = current.y + r;
       if (by < 0) { endGame(); return; }
       board[by][bx] = current.cells[r][c];
+      const ch = current.cells.chain;
+      chain[by][bx] = !!(ch && ch[0] === r && ch[1] === c);
     }
   }
   GameAudio.playLock(current.x);
@@ -811,10 +854,13 @@ function settleColumns() {
     for (let y = ROWS - 1; y >= 0; y--) {
       if (board[y][x] !== EMPTY) {
         board[write][x] = board[y][x];
+        chain[write][x] = chain[y][x];
+        chainWave[write][x] = chainWave[y][x];
         fallAnim[write][x] = (write - y) + fallAnim[y][x];
         fallVel[write][x] = fallVel[y][x];
         if (write !== y) {
           board[y][x] = EMPTY;
+          chain[y][x] = false; chainWave[y][x] = -1;
           fallAnim[y][x] = 0; fallVel[y][x] = 0;
         }
         write--;
@@ -822,6 +868,7 @@ function settleColumns() {
     }
     for (let y = write; y >= 0; y--) {
       board[y][x] = EMPTY;
+      chain[y][x] = false; chainWave[y][x] = -1;
       fallAnim[y][x] = 0; fallVel[y][x] = 0;
     }
   }
@@ -862,8 +909,67 @@ function markMatches() {
       }
     }
   }
+  // --- チェインブロックの発動 ---
+  // 2x2 が成立して消える対象になったチェインブロックから、
+  // 地続きの同色マスを幅優先で辿って全部消去対象にする。
+  // 参考動画と同じく、印のマスからの距離を持たせて外へ波打つように見せる。
+  const fired = chainFlood();
+  if (fired > 0) {
+    chainCells += fired;
+    chainWaveT = 0;
+    any = true; newOne = true;
+    Effects.banner("CHAIN " + fired, "#8affd8", "つながった同色をまとめて消去");
+    Effects.screenFlash(0.18);
+    GameAudio.playGrand();
+    padRumble(0.35, 0.5, 200);
+    // 印のマスから外へリングを飛ばして、波の起点を見せる
+    for (let y = 0; y < ROWS; y++)
+      for (let x = 0; x < COLS; x++)
+        if (chain[y][x] && chainWave[y][x] === 0) {
+          const { cx, cy } = cellCenter(x, y);
+          Effects.ring(cx, cy, "rgba(140,255,216,1)", CELL * 5);
+          Effects.burst(cx, cy, "rgba(140,255,216,1)", 14, 1.2);
+        }
+  }
+
   findBigBlocks();
   return any && newOne;
+}
+
+// 消去対象になったチェインブロックから同色を塗り広げる。巻き込んだ数を返す。
+function chainFlood() {
+  const seeds = [];
+  for (let y = 0; y < ROWS; y++)
+    for (let x = 0; x < COLS; x++)
+      if (chain[y][x] && marked[y][x] && board[y][x] !== EMPTY) seeds.push([x, y]);
+  if (!seeds.length) return 0;
+
+  chainWave = makeGrid(-1);
+  let added = 0;
+  for (const [sx, sy] of seeds) {
+    const color = board[sy][sx];
+    // 幅優先。dist は印のマスからの手数で、これが波の到達順になる。
+    let frontier = [[sx, sy]];
+    if (chainWave[sy][sx] < 0) chainWave[sy][sx] = 0;
+    let dist = 0;
+    while (frontier.length) {
+      const next = [];
+      for (const [x, y] of frontier) {
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+          if (board[ny][nx] !== color) continue;
+          if (chainWave[ny][nx] >= 0) continue;
+          chainWave[ny][nx] = dist + 1;
+          if (!marked[ny][nx]) { marked[ny][nx] = true; added++; }
+          next.push([nx, ny]);
+        }
+      }
+      frontier = next;
+      dist++;
+    }
+  }
+  return added;
 }
 
 // 1列だけを下へ詰める（マークも一緒に移動）
@@ -874,11 +980,14 @@ function settleColumn(x) {
       board[write][x] = board[y][x];
       marked[write][x] = marked[y][x];
       bigSize[write][x] = bigSize[y][x];
+      chain[write][x] = chain[y][x];
+      chainWave[write][x] = chainWave[y][x];
       // 落ちた距離を描画オフセットに足す（落下中にさらに落ちても破綻しない）
       fallAnim[write][x] = (write - y) + fallAnim[y][x];
       fallVel[write][x] = fallVel[y][x];
       if (write !== y) {
         board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0;
+        chain[y][x] = false; chainWave[y][x] = -1;
         fallAnim[y][x] = 0; fallVel[y][x] = 0;
       }
       write--;
@@ -886,6 +995,7 @@ function settleColumn(x) {
   }
   for (let y = write; y >= 0; y--) {
     board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0;
+    chain[y][x] = false; chainWave[y][x] = -1;
     fallAnim[y][x] = 0; fallVel[y][x] = 0;
   }
 }
@@ -983,6 +1093,13 @@ function resolveSweep() {
     const mult = multOf(combo - 1);   // combo++ 済みなので1つ戻して数える
     let pts = Math.round(sweepBase * mult * levelMult());
     if (sweepCleared >= 8) pts += 100;
+    // チェインで巻き込んだぶんは、通常の単価に加えてボーナスを乗せる
+    if (chainCells > 0) {
+      pts += Math.round(chainCells * CHAIN_BONUS * mult * levelMult());
+      Effects.banner("CHAIN BONUS +" + Math.round(chainCells * CHAIN_BONUS * mult * levelMult()),
+                     "#8affd8");
+      chainCells = 0;
+    }
     score += pts;
 
     // 連鎖はバナーと音で伝える。画面全体を揺らすと目が疲れるので控える。
@@ -998,6 +1115,7 @@ function resolveSweep() {
     checkLevelUp();
   } else {
     combo = 0;
+    chainCells = 0;
   }
   sweepCleared = 0;
   sweepBase = 0;
@@ -1214,8 +1332,38 @@ const hlColor = () => (chaining() ? HL_CHAIN : HL_IDLE);
 const hlPulse = () => 0.5 + 0.5 * Math.sin(performance.now() / 620);
 const rgbaOf = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
+// チェインの波がそのマスに届いているか。届くまでは消去待ちの表示を出さない。
+function markVisible(x, y) {
+  const d = chainWave[y][x];
+  if (d < 0) return true;                       // チェインとは無関係のマス
+  return chainWaveT >= d * CHAIN_WAVE;
+}
+
+// チェインブロックの印。中央の菱形と四隅の点。回転させて「特別なマス」だと分かるようにする。
+function drawChainMark(c, px, py, size, alpha = 1) {
+  const m = size / 2, t = performance.now() / 1000;
+  c.save();
+  c.translate(px + m, py + m);
+  c.rotate(t * 1.1);
+  c.globalAlpha = alpha;
+  c.shadowColor = "rgba(255,255,255,0.9)";
+  c.shadowBlur = size * 0.18;
+  c.fillStyle = "rgba(255,255,255,0.96)";
+  const r = size * 0.17;
+  c.beginPath();
+  c.moveTo(0, -r); c.lineTo(r, 0); c.lineTo(0, r); c.lineTo(-r, 0);
+  c.closePath(); c.fill();
+  c.shadowBlur = 0;
+  const q = size * 0.30;
+  for (const [dx, dy] of [[q, 0], [-q, 0], [0, q], [0, -q]]) {
+    c.beginPath(); c.arc(dx, dy, size * 0.065, 0, Math.PI * 2); c.fill();
+  }
+  c.restore();
+}
+
 function drawCell(c, x, y, color, size, opts = {}) {
   c.drawImage(blockSprite(color, size), x * size, y * size);
+  if (opts.chain) drawChainMark(c, x * size, y * size, size);
   if (opts.marked) {
     const col = hlColor();
     const pulse = hlPulse();
@@ -1281,7 +1429,8 @@ function render() {
   for (let y = 0; y < ROWS; y++)
     for (let x = 0; x < COLS; x++)
       if (board[y][x] !== EMPTY && !bigSize[y][x])
-        drawCell(ctx, x, y - fallAnim[y][x], board[y][x], CELL, { marked: marked[y][x] });
+        drawCell(ctx, x, y - fallAnim[y][x], board[y][x], CELL,
+                 { marked: marked[y][x] && markVisible(x, y), chain: chain[y][x] });
 
   // 豪華コマ
   for (let y = 0; y < ROWS; y++) {
@@ -1338,13 +1487,25 @@ function render() {
         }
       ctx.restore();
     }
+    // 出現直後の待ち。残り時間をコマの上の細いバーで示す。
+    if (holdTimer > 0) {
+      const spb = (typeof GameAudio !== "undefined" && GameAudio.secondsPerBeat) || 60 / 96;
+      const full = SPAWN_HOLD_BEATS * spb * 1000;
+      const w = 2 * CELL * (holdTimer / full);
+      const py = Math.max(0, current.y) * CELL;
+      ctx.fillStyle = "rgba(140,255,216,0.85)";
+      ctx.fillRect(current.x * CELL, py, w, 3);
+    }
+
     // 接地中は、固定までの残り時間が分かるように白く明滅させる。
     // 残りが少ないほど速く点滅するので「そろそろ固まる」が体で分かる。
     const lockT = lockTimer > 0 ? Math.min(1, lockTimer / LOCK_DELAY) : 0;
+    const cm = current.cells.chain;
     for (let r = 0; r < 2; r++)
       for (let c = 0; c < 2; c++) {
         const by = current.y + r;
-        if (by >= 0) drawCell(ctx, current.x + c, by, current.cells[r][c], CELL);
+        if (by >= 0) drawCell(ctx, current.x + c, by, current.cells[r][c], CELL,
+                              { chain: !!(cm && cm[0] === r && cm[1] === c) });
       }
     if (lockT > 0) {
       const blink = 0.5 + 0.5 * Math.sin(performance.now() / (60 + (1 - lockT) * 150));
@@ -1497,8 +1658,12 @@ function drawNext() {
     const oy = Math.round((h - sz * 2) / 2);
     nextCtx.globalAlpha = i === 0 ? 1 : 0.55;
     for (let r = 0; r < 2; r++)
-      for (let c = 0; c < 2; c++)
+      for (let c = 0; c < 2; c++) {
         nextCtx.drawImage(blockSprite(cells[r][c], sz), ox + c * sz, oy + r * sz);
+        const cm = cells.chain;
+        if (cm && cm[0] === r && cm[1] === c)
+          drawChainMark(nextCtx, ox + c * sz, oy + r * sz, sz, i === 0 ? 1 : 0.6);
+      }
     ox += sz * 2 + gap;
   }
   nextCtx.globalAlpha = 1;
@@ -1589,8 +1754,16 @@ function loop(now) {
     elapsedMs = now - startTimeMs;
 
     // 重力
+    // 出現直後の待ち。この間は落ちないが、移動と回転はできる。
+    // 下入力があれば待たずに落とす（待たされる感じにしないため）。
+    if (current && holdTimer > 0) {
+      if (softDrop || padSoftDrop || touchSoftDrop) holdTimer = 0;
+      else holdTimer = Math.max(0, holdTimer - dt * 1000);
+      if (holdTimer > 0) gravityTimer = 0;
+    }
+
     // 重力と接地。接地している間は落とさず、猶予を数えて時間切れで固定する。
-    if (current) {
+    if (current && holdTimer <= 0) {
       if (collides(current.x, current.y + 1, current.cells)) {
         gravityTimer = 0;
         lockTimer += dt * 1000;
@@ -1628,6 +1801,7 @@ function loop(now) {
   }
 
   updateFall(dt);
+  chainWaveT += dt;
   comboPop = Math.max(0, comboPop - dt * 3.2);
   Effects.update(dt);
   render();
@@ -1982,10 +2156,9 @@ function dragStepPx() {
   return cellPx() * DRAG_CELLS_PER_COL;
 }
 
-const dragZone = document.getElementById("dragzone");
-// 盤面とドラッグ領域は同じジェスチャを受ける。指がコマを隠さないよう、
-// 実際の操作は盤面下の領域で行えるようにしてある。
-const gestureTargets = [canvas, dragZone].filter(Boolean);
+// 左右移動はボタンで行うので、ジェスチャを受けるのは盤面だけにする
+// （タップ＝回転 / 上下スワイプ＝落下。横ドラッグも補助として残してある）。
+const gestureTargets = [canvas];
 
 function onGestureDown(e) {
   if (e.pointerType !== "touch") return;
@@ -2046,25 +2219,42 @@ gestureTargets.forEach((el) => {
     rotateCW: () => rotate(1),
     rotateCCW: () => rotate(-1),
     hardDrop: () => hardDrop(),
+    left: () => move(-1),
+    right: () => move(1),
     burst: () => triggerBurst(),
     slow: () => triggerSlow(),
     pause: () => { if (!gameOver) paused = !paused; },
     mute: () => GameAudio.toggleMute(),
   };
+  // 左右ボタンだけは押しっぱなしで連続移動する。
+  // 値はゲームパッドの DAS/ARR と揃えてあるので、持ち替えても感覚が変わらない。
+  const REPEAT = { left: true, right: true };
   const stopRepeat = () => {
     clearTimeout(repeatDelay); clearInterval(repeatTimer);
     repeatDelay = repeatTimer = null;
   };
 
-  // ボタンは画面上端(.toptouch)と下部(#touchpad)に分かれているので document で受ける
+  // ボタンは画面上端(.toptouch)・盤面下(#movepad)・下部(#touchpad)に分かれているので
+  // document でまとめて受ける
   document.addEventListener("pointerdown", (e) => {
-    const btn = e.target.closest && e.target.closest(".tbtn");
+    const btn = e.target.closest && e.target.closest(".tbtn, .mbtn");
     if (!btn) return;
     e.preventDefault();
     const act = btn.getAttribute("data-act");
     if (!running) { startGame(); return; }
     if (act === "softDrop") { touchSoftDrop = true; return; }
-    if (fire[act]) fire[act]();
+    if (!fire[act]) return;
+    fire[act]();
+    // 押しっぱなしのリピート（DAS で溜めてから ARR 間隔で繰り返す）
+    if (REPEAT[act]) {
+      stopRepeat();
+      repeatDelay = setTimeout(() => {
+        repeatTimer = setInterval(() => {
+          if (!running || gameOver || paused) { stopRepeat(); return; }
+          fire[act]();
+        }, PAD_ARR);
+      }, PAD_DAS);
+    }
   }, { passive: false });
 
   const release = () => { stopRepeat(); touchSoftDrop = false; };
@@ -2125,6 +2315,8 @@ function goHome() {
   bigSize = makeGrid(0);
   bigTop = makeGrid(0);
   fallAnim = makeGrid(0);
+  chain = makeGrid(false);
+  chainWave = makeGrid(-1);
   timelineCol = -1;
   timelineBeat = 0;
   burstGauge = 0;
@@ -2185,6 +2377,14 @@ window.LUMINA = {
   get paused() { return paused; },
   get maxCombo() { return maxCombo; },
   get lockTimer() { return lockTimer; },
+  get holdTimer() { return holdTimer; },
+  get holdFull() { return SPAWN_HOLD_BEATS * ((typeof GameAudio!=='undefined' && GameAudio.secondsPerBeat) || 60/96) * 1000; },
+  get chain() { return chain; },
+  get chainWave() { return chainWave; },
+  pieceChain() { return current ? (current.cells.chain || null) : null; },
+  setChain(x, y, on) { chain[y][x] = !!on; },
+  markNow() { return markMatches(); },
+  hardDropNow() { hardDrop(); },
   get lockResets() { return lockResets; },
   lockConst() { return { delay: LOCK_DELAY, max: LOCK_RESET_MAX }; },
   stepDown() { return current ? stepDown() : false; },
@@ -2334,6 +2534,33 @@ const TUT_STEPS = [
     done() { return bestBig >= BIG_MIN; },
   },
   {
+    title: "チェインブロック",
+    body: "落ちてくる4マスのうち1マスに、まれに印の付いたブロックが混じります。"
+        + "そのマスが 2×2 の一部として消えるとき、地続きにつながっている同じ色を"
+        + "まとめて消します。同色を広く伸ばしておくほど、大きく返ってきます。",
+    goal: "印の付いたマスが光ります。つながった同色がまとめて消去対象になるのを見てみましょう",
+    freeze: true,
+    setup() {
+      // 地続きの水色を長く伸ばし、その端に印を置いておく
+      tutBoard((x, y) => {
+        if (y === 9 && x >= 1 && x <= 11) return COLOR_A;
+        if (y === 8 && x >= 1 && x <= 5) return COLOR_A;
+        if (y >= 6 && y <= 7 && (x === 1 || x === 2)) return COLOR_A;
+        return EMPTY;
+      });
+      LUMINA_setChainForTutorial(1, 7);
+      tutSeen.chain0 = 0;
+      for (let y = 0; y < ROWS; y++)
+        for (let x = 0; x < COLS; x++) if (marked[y][x]) tutSeen.chain0++;
+    },
+    done() {
+      let n = 0;
+      for (let y = 0; y < ROWS; y++)
+        for (let x = 0; x < COLS; x++) if (chainWave[y][x] >= 0 && marked[y][x]) n++;
+      return n >= 8;
+    },
+  },
+  {
     title: "BURST A / B",
     body: "消すほどたまる BURST ゲージが満タンになると、2種類の必殺技が使えます。"
         + "A（Enter）は最下段4行を薙ぎ払って立て直す用。"
@@ -2353,6 +2580,12 @@ const TUT_STEPS = [
 // このステップではタイムラインを止めるか
 function tutFrozen() {
   return tutorialMode && tutStep >= 0 && !!(TUT_STEPS[tutStep] || {}).freeze;
+}
+
+// チュートリアルからチェインブロックを仕込むための小さな入口
+function LUMINA_setChainForTutorial(x, y) {
+  chain[y][x] = true;
+  markMatches();
 }
 
 function tutShow() {
@@ -2427,6 +2660,8 @@ board = makeGrid(EMPTY);
 marked = makeGrid(false);
 fallAnim = makeGrid(0);
 fallVel = makeGrid(0);
+chain = makeGrid(false);
+chainWave = makeGrid(-1);
 current = null;
 nextQueue = [randomCells(), randomCells()];
 level = 1;
