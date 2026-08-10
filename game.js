@@ -42,29 +42,28 @@ const COLORS = {
 // 「置き場所を考える間」だけは必ず残る。ソフトドロップ/即落下で打ち切れる。
 
 // ===== 落ちる前の待機 =====
-// スクリーン録画（ルミネス リマスター / スマホ版・40秒）の実測:
-//   ・タイムラインの1周 = 3.600 秒（40秒間ずっと一定。残差 1.4%）
-//   ・コマは盤面の枠外で待機し、そこで移動も回転もできる
-//   ・待機時間は 3.60 / 3.72 / 3.87 / 3.90 / 4.07 / 4.23 / 4.95 秒
-//     → 最短 3.60秒 = 掃引ちょうど1周。長い側はプレイヤーが粘っているぶん
-//   ・解放後は 0.2 秒以内に着地する速い落下
-// つまり「掃引1周ぶん枠外で組み立てて、決めたら一気に落とす」ゲーム。
+// 無操作のプレイ録画（ルミネス リマスター / PC版・33秒・1018x732）の実測。
+// 盤面は左213 上238 セル37.3px の 16x10。コマの上端を1/60秒ごとに追った:
+//   ・タイムラインの1周 = 3.588 秒（掃引位置の直線当てはめ。10秒窓で安定）
+//   ・コマは盤面の枠外（上に2行ぶん）で待ってから落ち始める
+//   ・2個目のコマ: 枠外に出てから落ち始めるまで 3.52 秒 ≒ 掃引ちょうど1周
 // 待機は掃引と同じ拍数で持つので、曲のテンポが変われば一緒に変わる。
 const HOLD_BEATS = 8.0;         // 掃引1周 = 2小節 = 8拍
 const HOLD_MIN_BEATS = 3.0;     // レベルで縮む下限
 const HOLD_LEVEL_STEP = 0.955;  // レベルごとに待機が縮む（難度の主軸）
 
 // ===== 解放後の自然落下 =====
-// 同じ録画で、コマの上端を1フレーム(1/60秒)ずつ追って落下区間を切り出した実測:
-//   自然落下 … 122 / 128 / 128 / 148 / 151 / 178 ms/行（中央値およそ 150ms）
-//   即落下   … 6〜35 ms/行（プレイヤー操作。1〜3行落ちたあたりで押している）
-// 150ms は 96BPM の16分音符（1/4拍 = 156ms）にほぼ一致する。ばらつきも
-// 曲のテンポ差で説明がつくので、「16分で1行」として拍に紐づける。
-// こうしておけば曲が変わっても落下の手触りが音と揃う。
-const GRAVITY_BEATS = 0.25;      // 1行落ちるのにかかる拍数（16分音符）
-const GRAVITY_MIN_BEATS = 0.11;  // レベルで縮む下限
-const GRAVITY_LEVEL_STEP = 0.975;
-const SOFT_DROP_INTERVAL = 22;   // ms/行: ソフトドロップ中は一気に速くする
+// 同じ録画の、プレイヤーが何も操作していない最初の2コマを1行ずつ計測:
+//   1個目 行4→行8 が 2.750 秒 → 687.5 ms/行
+//   2個目 行0→行2 が 1.370 秒 → 685.0 ms/行
+// つまり自然落下は 1行あたり約 0.69 秒。96BPM の1拍(625ms)にほぼ一致するので
+// 「1拍で1行」として拍に紐づける。曲が変わっても落下が音と揃う。
+// （以前は 42ms/行 → 150ms/行 としていたが、あれはプレイヤーが
+//   ソフトドロップ／即落下を混ぜている区間を拾ってしまっていた）
+const GRAVITY_BEATS = 1.0;       // 1行落ちるのにかかる拍数（4分音符 = 1拍）
+const GRAVITY_MIN_BEATS = 0.25;  // レベルで縮む下限（16分音符）
+const GRAVITY_LEVEL_STEP = 0.94;
+const SOFT_DROP_INTERVAL = 45;   // ms/行: ソフトドロップ中は一気に速くする
 
 // ===== 接地してから固定されるまでの猶予（ロックディレイ）=====
 // テトリスと同じく、着地しても少しのあいだは動かせる。動かすか回すたびに
@@ -88,7 +87,9 @@ const MAX_LEVEL = 30;
 //   落ちてくる4マスのうち1マスに印が付き、2x2 が成立して消える時に、
 //   そのマスと地続きになっている同色マスをまとめて消す。
 //   動画では印のマスを中心に、消去待ちの表示が外へ波状に広がっていく。
-const CHAIN_CHANCE = 0.16;      // 新しいコマにチェインブロックが混じる確率
+// 出現率は「20コマに1回くらい」。あくまでチャンス役なので、
+// 頻繁に来ると盤面を組む楽しさが薄れる。
+const CHAIN_CHANCE = 0.05;      // 新しいコマにチェインブロックが混じる確率
 const CHAIN_WAVE = 0.045;       // 波が1マス進むのにかかる秒数
 const CHAIN_BONUS = 4;          // チェインで消したセル1個あたりの追加点
 
@@ -164,8 +165,15 @@ const slowLeftEl = document.getElementById("slow-left");
 const trackNameEl = document.getElementById("track-name");
 
 // ===== ユーティリティ =====
+// 盤面の格子。0..ROWS-1 が枠の中（見えている盤面）で、
+// -PAD_ROWS..-1 は枠の上の待機エリア。参考動画のルミネス リマスターでも、
+// あふれたブロックは枠の外へ積み上がり、そこが埋まった時点でゲームオーバーになる。
+// 負の添字は配列の length に入らないので、既存の
+// for (y = 0; y < ROWS; y++) は今までどおり枠の中だけを回る。
 function makeGrid(fill) {
-  return Array.from({ length: ROWS }, () => Array(COLS).fill(fill));
+  const g = Array.from({ length: ROWS }, () => Array(COLS).fill(fill));
+  for (let y = -PAD_ROWS; y < 0; y++) g[y] = Array(COLS).fill(fill);
+  return g;
 }
 function randomCells() {
   const rnd = () => (Math.random() < 0.5 ? COLOR_A : COLOR_B);
@@ -777,8 +785,9 @@ function spawnPiece() {
   holdTimer = holdMs();
   while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   drawNext();
-  // 盤面の一番上が塞がっていたら終了（待機エリアには常に置ける）
-  if (collides(startX, 0, current.cells)) endGame();
+  // 待機エリアまで埋まって、新しいコマを置く場所が無くなったら終了。
+  // 参考動画でも、枠の上に2行ぶん積み上がったところでゲームオーバーになる。
+  if (collides(startX, -PAD_ROWS, current.cells)) endGame();
 }
 
 // ===== 衝突判定 =====
@@ -788,7 +797,7 @@ function collides(x, y, cells) {
       const bx = x + c, by = y + r;
       if (bx < 0 || bx >= COLS) return true;
       if (by >= ROWS) return true;
-      if (by >= 0 && board[by][bx] !== EMPTY) return true;
+      if (by >= -PAD_ROWS && board[by][bx] !== EMPTY) return true;
     }
   }
   return false;
@@ -866,7 +875,8 @@ function lockPiece() {
   for (let r = 0; r < 2; r++) {
     for (let c = 0; c < 2; c++) {
       const bx = current.x + c, by = current.y + r;
-      if (by < 0) { endGame(); return; }
+      // 枠の外（待機エリア）にも積める。次のコマが置けなくなった時点で
+      // spawnPiece() がゲームオーバーにする。
       board[by][bx] = current.cells[r][c];
       const ch = current.cells.chain;
       chain[by][bx] = !!(ch && ch[0] === r && ch[1] === c);
@@ -889,7 +899,8 @@ function lockPiece() {
 function settleColumns() {
   for (let x = 0; x < COLS; x++) {
     let write = ROWS - 1;
-    for (let y = ROWS - 1; y >= 0; y--) {
+    // 枠の外に積み上がったぶんも一緒に落とす
+    for (let y = ROWS - 1; y >= -PAD_ROWS; y--) {
       if (board[y][x] !== EMPTY) {
         board[write][x] = board[y][x];
         chain[write][x] = chain[y][x];
@@ -904,7 +915,7 @@ function settleColumns() {
         write--;
       }
     }
-    for (let y = write; y >= 0; y--) {
+    for (let y = write; y >= -PAD_ROWS; y--) {
       board[y][x] = EMPTY;
       chain[y][x] = false; chainWave[y][x] = -1;
       fallAnim[y][x] = 0; fallVel[y][x] = 0;
@@ -917,7 +928,7 @@ function settleColumns() {
 const FALL_G = 34;       // マス/秒^2
 const FALL_VMAX = 20;    // マス/秒
 function updateFall(dt) {
-  for (let y = 0; y < ROWS; y++) {
+  for (let y = -PAD_ROWS; y < ROWS; y++) {
     const fa = fallAnim[y], fv = fallVel[y];
     for (let x = 0; x < COLS; x++) {
       if (fa[x] <= 0) continue;
@@ -1013,7 +1024,8 @@ function chainFlood() {
 // 1列だけを下へ詰める（マークも一緒に移動）
 function settleColumn(x) {
   let write = ROWS - 1;
-  for (let y = ROWS - 1; y >= 0; y--) {
+  // 枠の外に積み上がったぶんも一緒に落とす
+  for (let y = ROWS - 1; y >= -PAD_ROWS; y--) {
     if (board[y][x] !== EMPTY) {
       board[write][x] = board[y][x];
       marked[write][x] = marked[y][x];
@@ -1031,7 +1043,7 @@ function settleColumn(x) {
       write--;
     }
   }
-  for (let y = write; y >= 0; y--) {
+  for (let y = write; y >= -PAD_ROWS; y--) {
     board[y][x] = EMPTY; marked[y][x] = false; bigSize[y][x] = 0;
     chain[y][x] = false; chainWave[y][x] = -1;
     fallAnim[y][x] = 0; fallVel[y][x] = 0;
@@ -1495,7 +1507,8 @@ function render() {
   }
 
   // セル（豪華コマに含まれるものは個別に描かず、大きな1個として描く）
-  for (let y = 0; y < ROWS; y++)
+  // 枠の外にあふれたぶん（y < 0）も描く。ここが埋まると次のコマが出せない。
+  for (let y = -PAD_ROWS; y < ROWS; y++)
     for (let x = 0; x < COLS; x++)
       if (board[y][x] !== EMPTY && !bigSize[y][x])
         drawCell(ctx, x, y - fallAnim[y][x], board[y][x], CELL,
@@ -2464,6 +2477,14 @@ window.LUMINA = {
   get lockResets() { return lockResets; },
   lockConst() { return { delay: LOCK_DELAY, max: LOCK_RESET_MAX }; },
   gravityMs() { return gravityInterval(); },
+  // 枠の外（待機エリア）に積み上がっているセル数を上の行から順に返す
+  overflow() {
+    const out = [];
+    for (let y = -PAD_ROWS; y < 0; y++)
+      out.push(board[y].filter((v) => v !== EMPTY).length);
+    return out;
+  },
+  rollChain() { return !!randomCells().chain; },
   get gravityBeat() { return gravityBeats(); },
   stepDown() { return current ? stepDown() : false; },
   rotate(d) { rotate(d); },
@@ -2492,7 +2513,11 @@ window.LUMINA = {
   pause(v) { paused = !!v; },
   endNow() { endGame(); },
   setBoard(grid) {
-    board = grid.map((row) => row.slice());
+    // makeGrid 経由にして、枠の外（負の行）も必ず用意する
+    const g = makeGrid(EMPTY);
+    for (let y = 0; y < ROWS; y++)
+      for (let x = 0; x < COLS; x++) g[y][x] = grid[y] ? (grid[y][x] || EMPTY) : EMPTY;
+    board = g;
     markMatches();
     updateHud();
   },
