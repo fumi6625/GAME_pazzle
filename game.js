@@ -1390,24 +1390,82 @@ function markVisible(x, y) {
 }
 
 // チェインブロックの印。中央の菱形と四隅の点。回転させて「特別なマス」だと分かるようにする。
+// チェインブロックの印。ふつうのコマと一目で見分けられることが最優先なので、
+// (1) マス全体を琥珀色で縁取り (2) 中央に脈打つ四芒星 (3) その周りを光の輪
+// の3段構えにする。色は消去待ちの琥珀と揃えてあるので、
+// 「この印が消えると、つながった同色がまとめて消える」が色で結びつく。
+const CHAIN_MARK = [255, 206, 92];
 function drawChainMark(c, px, py, size, alpha = 1) {
   const m = size / 2, t = performance.now() / 1000;
+  const pulse = 0.5 + 0.5 * Math.sin(t * 5.2);
+  const [R, G, B] = CHAIN_MARK;
   c.save();
-  c.translate(px + m, py + m);
-  c.rotate(t * 1.1);
   c.globalAlpha = alpha;
-  c.shadowColor = "rgba(255,255,255,0.9)";
-  c.shadowBlur = size * 0.18;
-  c.fillStyle = "rgba(255,255,255,0.96)";
-  const r = size * 0.17;
-  c.beginPath();
-  c.moveTo(0, -r); c.lineTo(r, 0); c.lineTo(0, r); c.lineTo(-r, 0);
-  c.closePath(); c.fill();
+  c.translate(px + m, py + m);
+
+  // 背後の光。マスの外まで少しにじませて、盤面の中で浮き上がらせる
+  const glow = c.createRadialGradient(0, 0, size * 0.05, 0, 0, m * 1.15);
+  glow.addColorStop(0, `rgba(${R},${G},${B},${0.34 + pulse * 0.20})`);
+  glow.addColorStop(1, `rgba(${R},${G},${B},0)`);
+  c.fillStyle = glow;
+  c.fillRect(-m, -m, size, size);
+
+  // マスの縁取り。内側に暗い線を添えて、明るいコマの上でも輪郭が消えないようにする
+  const lw = Math.max(2, size * 0.085);
+  c.lineWidth = lw;
+  c.strokeStyle = `rgba(255,240,190,${0.82 + pulse * 0.18})`;
+  c.shadowColor = `rgba(${R},${G},${B},0.95)`;
+  c.shadowBlur = size * (0.16 + pulse * 0.20);
+  const g1 = lw / 2 + 0.5;
+  c.strokeRect(-m + g1, -m + g1, size - g1 * 2, size - g1 * 2);
   c.shadowBlur = 0;
-  const q = size * 0.30;
-  for (const [dx, dy] of [[q, 0], [-q, 0], [0, q], [0, -q]]) {
-    c.beginPath(); c.arc(dx, dy, size * 0.065, 0, Math.PI * 2); c.fill();
+  c.lineWidth = Math.max(1, size * 0.03);
+  c.strokeStyle = "rgba(70,36,0,0.5)";
+  const g2 = lw + 1;
+  c.strokeRect(-m + g2, -m + g2, size - g2 * 2, size - g2 * 2);
+
+  // 星の下に暗い円盤を敷く。白いコマの上でも白い星が消えないようにするため、
+  // ここは必ず暗い色で塗る（コマの色は水色と桃色のどちらもかなり明るい）。
+  const disc = c.createRadialGradient(0, 0, size * 0.04, 0, 0, size * 0.34);
+  disc.addColorStop(0, "rgba(28,16,2,0.86)");
+  disc.addColorStop(0.72, "rgba(38,22,4,0.78)");
+  disc.addColorStop(1, "rgba(46,26,6,0)");
+  c.fillStyle = disc;
+  c.beginPath(); c.arc(0, 0, size * 0.34, 0, Math.PI * 2); c.fill();
+
+  // 中央の四芒星。ゆっくり回りながら大きさが脈打つ
+  c.save();
+  c.rotate(t * 0.8);
+  const out = size * (0.29 + pulse * 0.035), inn = out * 0.34;
+  c.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.PI / 4) * i, rr = i % 2 === 0 ? out : inn;
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    if (i) c.lineTo(x, y); else c.moveTo(x, y);
   }
+  c.closePath();
+  const sg = c.createLinearGradient(0, -out, 0, out);
+  sg.addColorStop(0, "rgba(255,255,250,1)");
+  sg.addColorStop(1, `rgba(${R},${G - 30},60,1)`);
+  c.fillStyle = sg;
+  c.shadowColor = "rgba(255,214,110,0.95)";
+  c.shadowBlur = size * 0.20;
+  c.fill();
+  c.shadowBlur = 0;
+  c.lineWidth = Math.max(1, size * 0.022);
+  c.strokeStyle = "rgba(50,26,0,0.75)";
+  c.stroke();
+  c.restore();
+
+  // 四隅の小さな鉤。印が付いたマスの範囲をはっきりさせる
+  c.strokeStyle = `rgba(255,246,214,${0.7 + pulse * 0.3})`;
+  c.lineWidth = Math.max(1.5, size * 0.045);
+  const k = m - lw - size * 0.06, e = size * 0.14;
+  c.beginPath();
+  for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    c.moveTo(sx * k - sx * e, sy * k); c.lineTo(sx * k, sy * k); c.lineTo(sx * k, sy * k - sy * e);
+  }
+  c.stroke();
   c.restore();
 }
 
@@ -2491,7 +2549,13 @@ window.LUMINA = {
   move(d) { move(d); },
   get quality() { return quality; },
   comboMult() { return comboMult(); },
-  nextQueue() { return nextQueue.map((c) => c.map((r) => r.slice())); },
+  nextQueue() {
+    return nextQueue.map((c) => {
+      const o = c.map((r) => r.slice());
+      o.chain = c.chain ? c.chain.slice() : null;   // map では独自プロパティが落ちる
+      return o;
+    });
+  },
   fallMax() {
     let m = 0;
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++)

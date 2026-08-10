@@ -45,15 +45,19 @@ const GameAudio = (() => {
   const SWING_RATIO = 0.12;             // 裏16分を16分の12%だけ後ろへ
   const HEADROOM = 1.083;               // ステム合計を元のミックス音量へ戻す係数
 
+  // semis: 操作音の移調量（PRISM SHUFFLE の F を 0 とした半音差）。
+  // 操作音は1セットしか持たないので、曲が変わったら再生レートで主音を合わせる。
+  // 素材は C マイナーペンタトニック = F ドリアンの部分集合なので、
+  // 主音ぶん動かせば A エオリアン / E エオリアン / D ドリアンにもそのまま乗る。
   const TRACKS = [
     { id: "PRISM_SHUFFLE", title: "PRISM SHUFFLE", genre: "ビッグビート / ファンク",
-      bpm: 96, base: "PRISM_SHUFFLE/", loop: "PRISM_SHUFFLE_loop" },
+      bpm: 96, semis: 0, base: "PRISM_SHUFFLE/", loop: "PRISM_SHUFFLE_loop" },
     { id: "NEON_MARCH", title: "NEON MARCH", genre: "4つ打ちテクノ",
-      bpm: 120, base: "PRISM_SHUFFLE/NEON_MARCH/", loop: "loop" },
+      bpm: 120, semis: 4, base: "PRISM_SHUFFLE/NEON_MARCH/", loop: "loop" },
     { id: "CIRCUIT_RUSH", title: "CIRCUIT RUSH", genre: "エレクトロ・ブレイクス",
-      bpm: 112, base: "PRISM_SHUFFLE/CIRCUIT_RUSH/", loop: "loop" },
+      bpm: 112, semis: -1, base: "PRISM_SHUFFLE/CIRCUIT_RUSH/", loop: "loop" },
     { id: "GLASS_TIDE", title: "GLASS TIDE", genre: "ダウンテンポ・ダブ",
-      bpm: 84, base: "PRISM_SHUFFLE/GLASS_TIDE/", loop: "loop" },
+      bpm: 84, semis: -3, base: "PRISM_SHUFFLE/GLASS_TIDE/", loop: "loop" },
   ];
   TRACKS.forEach((t) => {
     t.spb = 60 / t.bpm;
@@ -346,6 +350,10 @@ const GameAudio = (() => {
     if (o.key && !slotOK(o.key, t)) return;
     const s = ctx.createBufferSource();
     s.buffer = sfxBufs[name];
+    // 曲の主音に合わせて移調する。半音単位なので再生レートで足りる
+    // （最大でも ±4半音なので、音色の崩れより調が合う利点のほうが大きい）。
+    const semis = o.semis !== undefined ? o.semis : (T().semis || 0);
+    if (semis) s.playbackRate.value = Math.pow(2, semis / 12);
     const g = ctx.createGain();
     g.gain.value = o.gain !== undefined ? o.gain : 1;
     s.connect(g);
@@ -360,15 +368,17 @@ const GameAudio = (() => {
   }
 
   // --- ゲームからの呼び出し（音名は README の対応表どおり）---
+  // 打点主体の音に作り直したぶん RMS が下がっているので、
+  // 旧素材と同じ体感音量になるところまで音量を上げてある。
   function playMove(dir) {
-    playSfx(dir < 0 ? "move_left" : "move_right", { key: "mv", gain: 0.7, pan: dir < 0 ? -0.4 : 0.4 });
+    playSfx(dir < 0 ? "move_left" : "move_right", { key: "mv", gain: 1.15, pan: dir < 0 ? -0.4 : 0.4 });
   }
   function playRotate(dir = 1) {
-    playSfx(dir >= 0 ? "rotate_cw" : "rotate_ccw", { key: "rot", gain: 0.85, pan: dir >= 0 ? 0.25 : -0.25 });
+    playSfx(dir >= 0 ? "rotate_cw" : "rotate_ccw", { key: "rot", gain: 1.05, pan: dir >= 0 ? 0.25 : -0.25 });
   }
-  function playDrop() { playSfx("hard_drop", { key: "drop", gain: 0.9 }); }
+  function playDrop() { playSfx("hard_drop", { key: "drop", gain: 1.05 }); }
   function playLock(col) {
-    playSfx("lock", { key: "lock", gain: 0.7, pan: ((col || 0) / 16) * 1.2 - 0.6 });
+    playSfx("lock", { key: "lock", gain: 0.92, pan: ((col || 0) / 16) * 1.2 - 0.6 });
   }
   // 消去は同時消し数が多いほど厚い和音になる clear_1..4 を使う
   function playClear(index, row, pan = 0) {
@@ -470,7 +480,7 @@ const GameAudio = (() => {
     get sweepSeconds() { return T().sweepSec; },
     get trackIndex() { return trackIdx; },
     get track() { const t = T(); return { id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, sweepSec: t.sweepSec }; },
-    get trackList() { return TRACKS.map((t) => ({ id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, sweepSec: t.sweepSec })); },
+    get trackList() { return TRACKS.map((t) => ({ id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, semis: t.semis, sweepSec: t.sweepSec })); },
     get usingFallback() { return usingFallback; },
     get stemSource() { return stemSource; },
     get stemFrames() { const b = stemBufs["01_drums"]; return b ? b.length : 0; },
