@@ -95,7 +95,7 @@ const CHAIN_BONUS = 4;          // チェインで消したセル1個あたり�
 
 // ===== 豪華コマ（3x3 以上の同色正方形） =====
 const BIG_MIN = 3;
-const BURST_ROWS = 4;           // BURST-A が薙ぎ払う最下段からの行数
+const BURST_ROWS = 3;           // BURST-A が薙ぎ払う最下段からの行数（4行は強すぎた）
 const SLOW_DURATION = 14;       // BURST-B: タイムラインが遅くなる秒数
 const SLOW_FACTOR = 0.34;       // その間のタイムライン速度
 const BIG_BONUS = 0.6;          // セル単価の倍率 = 1 + (n-2) * BIG_BONUS
@@ -986,11 +986,38 @@ function markMatches() {
 }
 
 // 消去対象になったチェインブロックから同色を塗り広げる。巻き込んだ数を返す。
+// チェインブロックは「自分が 2x2 の一部になる」必要はない。
+// 同じ色でつながった塊のどこかに消去待ちのマスが1つでもあれば発動する。
+// ＝「チェインに繋がっただけで消える」特別なコマ。
+function sameColorGroup(sx, sy) {
+  const color = board[sy][sx];
+  const seen = new Set([sy * COLS + sx]);
+  const cells = [[sx, sy]];
+  let touchesMarked = marked[sy][sx];
+  for (let i = 0; i < cells.length; i++) {
+    const [x, y] = cells[i];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+      if (board[ny][nx] !== color) continue;
+      const key = ny * COLS + nx;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (marked[ny][nx]) touchesMarked = true;
+      cells.push([nx, ny]);
+    }
+  }
+  return { cells, touchesMarked };
+}
+
 function chainFlood() {
   const seeds = [];
   for (let y = 0; y < ROWS; y++)
-    for (let x = 0; x < COLS; x++)
-      if (chain[y][x] && marked[y][x] && board[y][x] !== EMPTY) seeds.push([x, y]);
+    for (let x = 0; x < COLS; x++) {
+      if (!chain[y][x] || board[y][x] === EMPTY) continue;
+      // 自分が消去待ちでなくても、つながった塊が消えるなら一緒に消える
+      if (marked[y][x] || sameColorGroup(x, y).touchesMarked) seeds.push([x, y]);
+    }
   if (!seeds.length) return 0;
 
   chainWave = makeGrid(-1);
@@ -1000,6 +1027,8 @@ function chainFlood() {
     // 幅優先。dist は印のマスからの手数で、これが波の到達順になる。
     let frontier = [[sx, sy]];
     if (chainWave[sy][sx] < 0) chainWave[sy][sx] = 0;
+    // 印のマス自身も消す。2x2 の一部でないことがあるので、ここで明示的に。
+    if (!marked[sy][sx]) { marked[sy][sx] = true; added++; }
     let dist = 0;
     while (frontier.length) {
       const next = [];
@@ -2731,7 +2760,7 @@ const TUT_STEPS = [
   {
     title: "BURST A / B",
     body: "消すほどたまる BURST ゲージが満タンになると、2種類の必殺技が使えます。"
-        + "A（Enter）は最下段4行を薙ぎ払って立て直す用。"
+        + "A（Enter）は最下段3行を薙ぎ払って立て直す用。"
         + "B（Shift）はタイムラインを遅くして、大きな正方形を作る時間をかせぐ用です。",
     goal: "ゲージを満タンにしてあります。BURST A か B を使ってみましょう",
     setup() {
