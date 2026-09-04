@@ -188,9 +188,9 @@ body {
   display: grid;
   place-items: center;
   background: radial-gradient(circle at 38% 34%,
-              rgba(150, 225, 255, 0.42), rgba(60, 150, 210, 0.16) 70%,
+              rgba(180, 235, 255, 0.30), rgba(90, 175, 225, 0.12) 66%,
               rgba(40, 110, 170, 0) 100%);
-  box-shadow: 0 0 26px rgba(120, 210, 255, 0.28);
+  box-shadow: 0 0 24px rgba(120, 210, 255, 0.20);
   color: rgba(230, 250, 255, 0.85);
   font-size: clamp(14px, 3vw, 30px);
   position: relative;
@@ -201,8 +201,8 @@ body {
   top: 38%;
   width: 13%; height: 20%;
   border-radius: 50%;
-  background: rgba(240, 252, 255, 0.9);
-  box-shadow: 0 0 8px rgba(160, 230, 255, 0.8);
+  background: rgba(240, 252, 255, 0.62);
+  box-shadow: 0 0 8px rgba(160, 230, 255, 0.55);
 }
 .mascot .eye.l { left: 27%; }
 .mascot .eye.r { right: 27%; }
@@ -210,7 +210,7 @@ body {
   position: absolute;
   left: 34%; right: 34%; top: 62%;
   height: 16%;
-  border-bottom: 2px solid rgba(240, 252, 255, 0.85);
+  border-bottom: 2px solid rgba(240, 252, 255, 0.55);
   border-radius: 0 0 60% 60%;
 }
 

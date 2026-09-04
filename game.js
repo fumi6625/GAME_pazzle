@@ -983,8 +983,8 @@ function markMatches() {
     }
   }
   // --- チェインブロックの発動 ---
-  // 2x2 が成立して消える対象になったチェインブロックから、
-  // 地続きの同色マスを幅優先で辿って全部消去対象にする。
+  // 印のマスは自分が 2x2 でなくてよい。地続きの同色のどこかが消えるなら、
+  // そこから幅優先で辿って塊を全部消去対象にする。
   // 参考動画と同じく、印のマスからの距離を持たせて外へ波打つように見せる。
   const fired = chainFlood();
   if (fired > 0) {
@@ -1564,22 +1564,10 @@ function drawCell(c, x, y, color, size, opts = {}) {
 }
 
 // 待機エリア（盤面の枠外）。ここに落ちる前のコマが浮いている。
-function drawHoldArea() {
-  const w = COLS * CELL, h = padY();
-  const sk = isRemaster() ? Effects.skin() : null;
-  ctx.save();
-  // 盤面より暗くして「外側」だと分かるようにする
-  ctx.fillStyle = sk
-    ? `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.10)`
-    : "rgba(6,8,18,0.18)";
-  ctx.fillRect(0, 0, w, h);
-  // 盤面との境界。ここを越えたら固定されるという線。
-  // 枠の上端。参考画面と同じく実線1本にする（CSS の左右下の枠と繋がる）
-  ctx.strokeStyle = sk ? "rgba(255,255,255,0.55)" : "rgba(140,210,255,0.45)";
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(0, h - 0.5); ctx.lineTo(w, h - 0.5); ctx.stroke();
-  ctx.restore();
-}
+// 待機エリア（盤面の枠外）。参考画面では、ここには面も線も無く、
+// 落ちる前のコマだけが浮いている。枠は左・右・下だけ（上は開いている）。
+// 何も描かないが、呼び出し側の見通しのために関数は残す。
+function drawHoldArea() { /* 何も描かない */ }
 
 function render() {
   drawFloor();
@@ -1604,16 +1592,16 @@ function render() {
     // 参考画面の盤面は「背景の絵がはっきり透ける半透明の面 + スキン色の
     // 細いグリッド + 交点の小さな点」。暗幕を濃くしすぎると絵が死ぬので薄く。
     const sk = Effects.skin();
-    ctx.fillStyle = `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.30)`;
+    ctx.fillStyle = `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.40)`;
     ctx.fillRect(0, 0, COLS * CELL, ROWS * CELL);
-    ctx.strokeStyle = `rgba(${sk.line[0]},${sk.line[1]},${sk.line[2]},0.42)`;
+    ctx.strokeStyle = `rgba(${sk.line[0]},${sk.line[1]},${sk.line[2]},0.26)`;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = 1; x < COLS; x++) { ctx.moveTo(x * CELL + 0.5, 0); ctx.lineTo(x * CELL + 0.5, ROWS * CELL); }
     for (let y = 1; y < ROWS; y++) { ctx.moveTo(0, y * CELL + 0.5); ctx.lineTo(COLS * CELL, y * CELL + 0.5); }
     ctx.stroke();
     // 交点の点
-    ctx.fillStyle = `rgba(${sk.line[0]},${sk.line[1]},${sk.line[2]},0.75)`;
+    ctx.fillStyle = `rgba(${sk.line[0]},${sk.line[1]},${sk.line[2]},0.55)`;
     const dr = Math.max(1, CELL * 0.045);
     for (let x = 1; x < COLS; x++)
       for (let y = 1; y < ROWS; y++) {
@@ -2827,8 +2815,9 @@ const TUT_STEPS = [
   {
     title: "チェインブロック",
     body: "落ちてくる4マスのうち1マスに、まれに印の付いたブロックが混じります。"
-        + "そのマスが 2×2 の一部として消えるとき、地続きにつながっている同じ色を"
-        + "まとめて消します。同色を広く伸ばしておくほど、大きく返ってきます。",
+        + "このマスだけは特別で、自分が 2×2 になっていなくても、"
+        + "地続きにつながった同じ色のどこかが消えるだけで一緒に発動し、"
+        + "その塊をまとめて消します。同色を広く伸ばしておくほど大きく返ってきます。",
     goal: "印の付いたマスが光ります。つながった同色がまとめて消去対象になるのを見てみましょう",
     freeze: true,
     setup() {
