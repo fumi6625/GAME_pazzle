@@ -427,19 +427,28 @@ const Effects = (() => {
   // ink=盤面パネル, a/b=コマの2色, line=タイムライン, grid=盤面グリッド
   // ※ 参考動画のスキンには明るい色面のものもあるが、この実装は HUD が明色なので、
   //    可読性を保つため色相はそのままに輝度を中〜暗に寄せてある。
+  // 参考画面のスキンは「鮮やかな1枚絵」。暗く沈ませず、彩度の高い空 + 光条 +
+  // 大きなシルエットで、遠目にも1枚の絵として成立させる。
+  // sky は3段（上/中/下）。glow は光の色、silh はシルエットの色。
   const SKINS = [
-    { id: "MINT", sky: [[74, 118, 112], [16, 38, 40]], ink: [10, 26, 30],
-      a: [64, 172, 222], b: [238, 245, 248], line: [255, 206, 92], grid: [186, 236, 226], motif: "rings" },
-    { id: "VIOLET", sky: [[92, 62, 132], [42, 26, 66]], ink: [20, 12, 34],
-      a: [226, 96, 196], b: [240, 238, 250], line: [255, 226, 120], grid: [214, 180, 255], motif: "bars" },
-    { id: "EMBER", sky: [[74, 44, 34], [26, 16, 16]], ink: [26, 14, 10],
-      a: [255, 140, 56], b: [236, 232, 226], line: [120, 226, 255], grid: [255, 190, 130], motif: "bokeh" },
-    { id: "TEAL", sky: [[26, 82, 92], [8, 30, 40]], ink: [6, 22, 30],
-      a: [96, 226, 214], b: [244, 248, 246], line: [255, 176, 96], grid: [150, 240, 232], motif: "horizon" },
-    { id: "CRIMSON", sky: [[104, 26, 44], [30, 10, 18]], ink: [26, 8, 14],
-      a: [255, 84, 96], b: [242, 236, 234], line: [255, 232, 140], grid: [255, 150, 160], motif: "grid" },
-    { id: "INDIGO", sky: [[36, 48, 110], [10, 14, 38]], ink: [8, 12, 30],
-      a: [110, 150, 255], b: [238, 242, 252], line: [255, 214, 96], grid: [160, 186, 255], motif: "sun" },
+    { id: "AZURE", sky: [[42, 148, 226], [22, 108, 200], [8, 52, 122]], ink: [6, 26, 58],
+      a: [255, 150, 40], b: [232, 238, 244], line: [255, 90, 96], grid: [255, 210, 120],
+      glow: [190, 235, 255], silh: [8, 22, 52], motif: "rays" },
+    { id: "BUBBLE", sky: [[255, 120, 190], [110, 150, 235], [26, 46, 120]], ink: [18, 26, 74],
+      a: [255, 214, 60], b: [96, 214, 240], line: [255, 255, 255], grid: [255, 190, 225],
+      glow: [255, 220, 240], silh: [40, 20, 70], motif: "bokeh" },
+    { id: "PAPER", sky: [[214, 226, 214], [176, 196, 190], [96, 122, 124]], ink: [40, 52, 54],
+      a: [36, 40, 44], b: [246, 248, 250], line: [230, 60, 70], grid: [120, 140, 145],
+      glow: [255, 255, 255], silh: [70, 86, 90], motif: "bars" },
+    { id: "STEEL", sky: [[86, 106, 140], [44, 58, 88], [12, 18, 34]], ink: [10, 16, 30],
+      a: [96, 226, 240], b: [232, 60, 140], line: [235, 240, 250], grid: [170, 200, 230],
+      glow: [200, 240, 255], silh: [16, 22, 40], motif: "rings" },
+    { id: "SUNSET", sky: [[255, 132, 96], [186, 76, 150], [52, 22, 74]], ink: [34, 14, 44],
+      a: [255, 132, 48], b: [244, 240, 236], line: [255, 236, 150], grid: [255, 176, 200],
+      glow: [255, 226, 190], silh: [46, 18, 52], motif: "sun" },
+    { id: "NEON", sky: [[40, 60, 190], [90, 30, 160], [12, 10, 46]], ink: [10, 10, 40],
+      a: [120, 160, 255], b: [255, 100, 210], line: [120, 255, 240], grid: [180, 200, 255],
+      glow: [200, 220, 255], silh: [10, 8, 34], motif: "grid" },
   ];
   // レベルが上がるたびに次のスキンへ。切り替えは 0.9 秒でクロスフェード。
   let skinIdx = 0, skinPrev = 0, skinFade = 1;
@@ -605,104 +614,137 @@ const Effects = (() => {
   // ===== REMASTER: 平面2Dスキンの描画 =====
   // 参考動画では背景に奥行きが無い。1枚の色面 + モチーフ1つで、
   // 「盤面が主役、背景は雰囲気」という関係をはっきりさせる。
+  // 参考画面のスキンは「鮮やかな1枚絵」。ここを地味にすると、どれだけ
+  // レイアウトを合わせても別のゲームに見える。彩度の高い空・強い光条・
+  // 大きなシルエットの3層で、遠目にも絵として成立させる。
   function skinField(ctx, w, h, S, t, pulse, bar, alpha) {
     ctx.save();
     ctx.globalAlpha = alpha;
 
-    // --- ベースの色面 ---
-    const g = ctx.createLinearGradient(0, 0, w * 0.25, h);
+    // --- 1) 空（3段グラデーション）---
+    const g = ctx.createLinearGradient(0, 0, w * 0.18, h);
     g.addColorStop(0, rgba(S.sky[0], 1));
-    g.addColorStop(1, rgba(S.sky[1], 1));
+    g.addColorStop(0.52, rgba(S.sky[1], 1));
+    g.addColorStop(1, rgba(S.sky[2] || S.sky[1], 1));
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
 
-    const cx = w * 0.5, cy = h * 0.5;
+    const cx = w * 0.5, cy = h * 0.46;
     const R = Math.max(w, h);
+    const glow = S.glow || S.grid;
+
+    // --- 2) 中央の大きな光。拍で膨らむ ---
+    const gr = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * (0.42 + pulse * 0.05));
+    gr.addColorStop(0, rgba(glow, 0.34 + pulse * 0.16));
+    gr.addColorStop(0.45, rgba(glow, 0.10));
+    gr.addColorStop(1, rgba(glow, 0));
+    ctx.fillStyle = gr;
+    ctx.fillRect(0, 0, w, h);
+
     ctx.globalCompositeOperation = "lighter";
 
+    // --- 3) 光条（参考画面のレーザー）---
+    const rays = 7;
+    for (let i = 0; i < rays; i++) {
+      const ang = (i / rays) * Math.PI + t * 0.055 + Math.sin(t * 0.21 + i) * 0.12;
+      const len = R * 1.2;
+      const wdt = (3 + 10 * (0.5 + 0.5 * Math.sin(t * 0.7 + i * 1.7))) * (1 + pulse);
+      const ox = cx + Math.cos(ang) * len * 0.5;
+      const oy = cy + Math.sin(ang) * len * 0.5;
+      const lg = ctx.createLinearGradient(cx, cy, ox, oy);
+      lg.addColorStop(0, rgba(glow, (0.20 + pulse * 0.16)));
+      lg.addColorStop(1, rgba(glow, 0));
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(ang);
+      ctx.fillStyle = lg;
+      ctx.fillRect(0, -wdt / 2, len * 0.5, wdt);
+      ctx.fillRect(-len * 0.5, -wdt / 2, len * 0.5, wdt);
+      ctx.restore();
+    }
+
+    // --- 4) モチーフ ---
     if (S.motif === "rings") {
-      // 同心円がゆっくり広がる。拍で1枚ぶん明るくなる。
       for (let i = 0; i < 7; i++) {
-        const ph = (t * 0.055 + i / 7) % 1;
-        const r = ph * R * 0.72;
-        const a = (1 - ph) * (0.10 + pulse * 0.10) * alpha;
-        if (a <= 0.004 || r < 4) continue;
-        ctx.strokeStyle = rgba(S.grid, a);
-        ctx.lineWidth = 2 + (1 - ph) * 22;
+        const ph = (t * 0.06 + i / 7) % 1;
+        const r = ph * R * 0.8;
+        const al = (1 - ph) * (0.20 + pulse * 0.14);
+        if (al <= 0.004 || r < 4) continue;
+        ctx.strokeStyle = rgba(S.grid, al);
+        ctx.lineWidth = 2 + (1 - ph) * 26;
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
       }
     } else if (S.motif === "bars") {
-      // ゆっくり流れる縦帯
       const n = 9;
       for (let i = 0; i < n; i++) {
-        const x = ((i / n + t * 0.02) % 1) * (w + 200) - 100;
-        const bw = w * (0.05 + 0.05 * Math.sin(i * 2.3));
-        const a = (0.05 + pulse * 0.05) * alpha;
+        const x = ((i / n + t * 0.022) % 1) * (w + 200) - 100;
+        const bw = w * (0.05 + 0.06 * Math.sin(i * 2.3));
+        const al = 0.14 + pulse * 0.10;
         const lg = ctx.createLinearGradient(x, 0, x + bw, 0);
         lg.addColorStop(0, rgba(S.grid, 0));
-        lg.addColorStop(0.5, rgba(S.grid, a));
+        lg.addColorStop(0.5, rgba(S.grid, al));
         lg.addColorStop(1, rgba(S.grid, 0));
         ctx.fillStyle = lg;
         ctx.fillRect(x, 0, bw, h);
       }
     } else if (S.motif === "bokeh") {
-      // 大きなボケ玉が漂う
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 14; i++) {
         const sd = Math.sin(i * 41.7) * 43758.5453;
         const rnd = sd - Math.floor(sd);
-        const x = ((rnd + t * 0.012 * (0.4 + rnd)) % 1.2 - 0.1) * w;
-        const y = (0.15 + 0.7 * ((rnd * 7.3) % 1)) * h + Math.sin(t * 0.3 + i) * 18;
-        const r = R * (0.05 + rnd * 0.13);
+        const x = ((rnd + t * 0.014 * (0.4 + rnd)) % 1.2 - 0.1) * w;
+        const y = (0.10 + 0.8 * ((rnd * 7.3) % 1)) * h + Math.sin(t * 0.3 + i) * 22;
+        const r = R * (0.04 + rnd * 0.14);
         const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
-        rg.addColorStop(0, rgba(S.grid, (0.07 + pulse * 0.05) * alpha));
+        rg.addColorStop(0, rgba(S.grid, 0.20 + pulse * 0.10));
+        rg.addColorStop(0.78, rgba(S.grid, 0.09));
         rg.addColorStop(1, rgba(S.grid, 0));
         ctx.fillStyle = rg;
         ctx.fillRect(x - r, y - r, r * 2, r * 2);
       }
-    } else if (S.motif === "horizon") {
-      // 下方向の地平グロー + 平面のスカイライン（silhouette）
-      const hg = ctx.createLinearGradient(0, h * 0.58, 0, h);
-      hg.addColorStop(0, rgba(S.grid, 0));
-      hg.addColorStop(1, rgba(S.grid, (0.14 + pulse * 0.08) * alpha));
-      ctx.fillStyle = hg;
-      ctx.fillRect(0, h * 0.58, w, h * 0.42);
-      ctx.globalCompositeOperation = "source-over";
-      ctx.fillStyle = rgba(S.sky[1], 0.55 * alpha);
-      const base = h * 0.9, unit = w / 26;
-      for (let i = 0; i < 26; i++) {
-        const sd = Math.sin((i + skinIdx * 3) * 12.9898) * 43758.5453;
-        const rnd = sd - Math.floor(sd);
-        const bh = h * (0.04 + rnd * 0.13);
-        ctx.fillRect(i * unit + (t * 6) % unit - unit, base - bh, unit * 0.82, bh);
-      }
-    } else if (S.motif === "grid") {
-      // 平面のグリッド（3Dにはしない）が横へ流れる
-      const cell = Math.max(28, h / 12);
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = rgba(S.grid, (0.055 + pulse * 0.045) * alpha);
-      ctx.beginPath();
-      const ox = (t * 26) % cell;
-      for (let x = -cell; x < w + cell; x += cell) { ctx.moveTo(x + ox, 0); ctx.lineTo(x + ox, h); }
-      for (let y = 0; y < h + cell; y += cell) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
-      ctx.stroke();
     } else if (S.motif === "sun") {
-      // 大きな円盤と、そこから伸びる淡い扇
-      const r = R * (0.20 + bar * 0.012);
-      const rg = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
-      rg.addColorStop(0, rgba(S.grid, (0.16 + pulse * 0.08) * alpha));
+      const sy = h * 0.30;
+      const rg = ctx.createRadialGradient(cx, sy, 0, cx, sy, R * 0.30);
+      rg.addColorStop(0, rgba(S.grid, 0.46));
+      rg.addColorStop(0.55, rgba(S.grid, 0.14));
       rg.addColorStop(1, rgba(S.grid, 0));
       ctx.fillStyle = rg;
-      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-      for (let i = 0; i < 12; i++) {
-        const ang = (i / 12) * TAU + t * 0.06;
-        ctx.strokeStyle = rgba(S.grid, (0.035 + pulse * 0.03) * alpha);
-        ctx.lineWidth = 26;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(ang) * r * 0.7, cy + Math.sin(ang) * r * 0.7);
-        ctx.lineTo(cx + Math.cos(ang) * R * 0.8, cy + Math.sin(ang) * R * 0.8);
-        ctx.stroke();
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 6; i++) {
+        const yy = sy + R * 0.06 + i * R * 0.028;
+        ctx.fillStyle = rgba(S.sky[2] || S.sky[1], 0.5);
+        ctx.fillRect(cx - R * 0.3, yy, R * 0.6, R * 0.012 + i * R * 0.004);
       }
+    } else if (S.motif === "grid") {
+      const n = 16;
+      ctx.strokeStyle = rgba(S.grid, 0.16 + pulse * 0.10);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i <= n; i++) {
+        const x = (i / n) * w;
+        ctx.moveTo(x, h * 0.62); ctx.lineTo(cx + (x - cx) * 3.2, h);
+      }
+      for (let i = 1; i < 9; i++) {
+        const y = h * 0.62 + Math.pow(i / 9, 2.1) * h * 0.38;
+        ctx.moveTo(0, y); ctx.lineTo(w, y);
+      }
+      ctx.stroke();
     }
+
+    // --- 5) 大きなシルエット。1枚絵としての「主役」を作る ---
+    ctx.globalCompositeOperation = "source-over";
+    const silh = S.silh || S.ink;
+    ctx.fillStyle = rgba(silh, 0.55);
+    const bob = Math.sin(t * 0.35) * h * 0.012;
+    ctx.beginPath();
+    ctx.ellipse(w * 0.30, h * 0.72 + bob, w * 0.20, h * 0.30, -0.25, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(w * 0.74, h * 0.78 - bob, w * 0.17, h * 0.26, 0.3, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, h * 1.02, w * 0.44, h * 0.22, 0, 0, TAU);
+    ctx.fill();
+
     ctx.restore();
   }
 
@@ -721,7 +763,7 @@ const Effects = (() => {
     const vg = ctx.createRadialGradient(w * 0.5, h * 0.5, Math.min(w, h) * 0.22,
                                         w * 0.5, h * 0.5, Math.max(w, h) * 0.72);
     vg.addColorStop(0, "rgba(0,0,0,0)");
-    vg.addColorStop(1, `rgba(0,0,0,${(0.52 + (1 - intensity) * 0.06).toFixed(3)})`);
+    vg.addColorStop(1, `rgba(0,0,0,${(0.26 + (1 - intensity) * 0.05).toFixed(3)})`);
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, w, h);
   }

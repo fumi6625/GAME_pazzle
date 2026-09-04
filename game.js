@@ -116,9 +116,10 @@ let chainCells = 0;             // 直近のチェインで巻き込んだセル
 let bigSize, bigTop;            // 豪華コマ: 各セルが属する正方形の辺長 / 左上セルの辺長
 let current;
 // 先読みキュー。先頭が次、その次が次の次。2手先まで見えると組み立てを計画できる。
-const NEXT_VIEW = 2;
+const NEXT_VIEW = 3;   // 左レールに 2nd/3rd/4th の3つ（1st は盤面の枠外にいる）
 let nextQueue = [];
 let score, squaresCleared, combo, maxCombo;
+let erasedCells = 0;      // 消したセルの総数（HUD の ERASED）
 let level, nextLevelAt, levelFlash;
 let bestBig;                    // このプレイで作った最大の豪華コマ
 let burstGauge, burstReady;
@@ -141,12 +142,18 @@ const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
 const bgCanvas = document.getElementById("bg");
 const bgCtx = bgCanvas.getContext("2d");
-const nextCanvas = document.getElementById("next");
-const nextCtx = nextCanvas.getContext("2d");
+// NEXT のコマは盤面キャンバスの枠外2行に描かれるので、専用キャンバスは持たない
 
 // HUD
 const scoreEl = document.getElementById("score");
 const squaresEl = document.getElementById("squares");
+const erasedEl = document.getElementById("erased");
+const hiScoreEl = document.getElementById("hiscore");
+const queueCanvas = document.getElementById("queue");
+const queueCtx = queueCanvas ? queueCanvas.getContext("2d") : null;
+const floorCanvas = document.getElementById("floor");
+const floorCtx = floorCanvas ? floorCanvas.getContext("2d") : null;
+const seqStripEl = document.getElementById("seq-strip");
 const timeEl = document.getElementById("time");
 const comboEl = document.getElementById("combo");
 const burstFillEl = document.getElementById("burst-fill");
@@ -257,11 +264,9 @@ function trackIndexForLevel(l) {
 function renderTrackName() {
   if (!trackNameEl || !GameAudio.track) return;
   const t = GameAudio.track;
-  trackNameEl.innerHTML = "";
-  trackNameEl.appendChild(document.createTextNode(t.title));
-  const sm = document.createElement("small");
-  sm.textContent = `${t.genre} / ${t.bpm} BPM / ライン ${t.sweepSec.toFixed(2)}秒`;
-  trackNameEl.appendChild(sm);
+  // 参考画面は右下に「♪ 曲名 / アーティスト」の1行。ここも1行に収める。
+  trackNameEl.textContent = `${t.title} / ${t.genre}`;
+  trackNameEl.title = `${t.genre} / ${t.bpm} BPM / ライン ${t.sweepSec.toFixed(2)}秒`;
 }
 
 function maybeChangeTrack() {
@@ -459,24 +464,41 @@ function flatSprite(color, size) {
   const shade = (t) => [
     Math.round(base[0] * t), Math.round(base[1] * t), Math.round(base[2] * t),
   ];
-  const g = Math.max(1, Math.round(size * 0.055));   // セル間の目地
+  const g = Math.max(1, Math.round(size * 0.05));    // セル間の目地
+  const b0 = g, sz = size - g * 2;
 
-  // 本体
-  c.fillStyle = rgb(shade(0.82), 1);
-  c.fillRect(g, g, size - g * 2, size - g * 2);
-  // 斜め分割: 左上の三角だけ明るくして、動画のコマの「斜めの面」を再現する
-  c.fillStyle = rgb(base, 1);
-  c.beginPath();
-  c.moveTo(g, g); c.lineTo(size - g, g); c.lineTo(g, size - g); c.closePath();
-  c.fill();
-  // 内側の細いハイライトと外側の縁
-  c.strokeStyle = rgb(shade(1.28), 0.55);
-  c.lineWidth = Math.max(1, size * 0.05);
-  c.strokeRect(g + c.lineWidth / 2, g + c.lineWidth / 2,
-               size - g * 2 - c.lineWidth, size - g * 2 - c.lineWidth);
-  c.strokeStyle = rgb(shade(0.4), 0.85);
+  // 参考画面のコマは「明るい外枠 → 上が明るいベベルの面 → 中央に一回り小さい四角」。
+  // 斜めに割るのではなく、この3層で作ると同じ見え方になる。
+  // 1) 面（上が明るく下が暗い縦グラデーション）
+  const grad = c.createLinearGradient(0, b0, 0, b0 + sz);
+  grad.addColorStop(0, rgb(shade(1.12), 1));
+  grad.addColorStop(0.5, rgb(base, 1));
+  grad.addColorStop(1, rgb(shade(0.72), 1));
+  c.fillStyle = grad;
+  c.fillRect(b0, b0, sz, sz);
+
+  // 2) 外枠（明るい線 + 内側に落ちる影）
+  const lw = Math.max(1, Math.round(size * 0.055));
+  c.strokeStyle = rgb(shade(1.55), 0.95);
+  c.lineWidth = lw;
+  c.strokeRect(b0 + lw / 2, b0 + lw / 2, sz - lw, sz - lw);
+  c.strokeStyle = "rgba(0,0,0,0.42)";
   c.lineWidth = 1;
-  c.strokeRect(g + 0.5, g + 0.5, size - g * 2 - 1, size - g * 2 - 1);
+  c.strokeRect(b0 + 0.5, b0 + 0.5, sz - 1, sz - 1);
+
+  // 3) 中央のチップ（一回り小さい四角）
+  const cs = Math.round(sz * 0.42), co = b0 + Math.round((sz - cs) / 2);
+  const cg = c.createLinearGradient(0, co, 0, co + cs);
+  cg.addColorStop(0, rgb(shade(0.66), 1));
+  cg.addColorStop(1, rgb(shade(0.94), 1));
+  c.fillStyle = cg;
+  c.fillRect(co, co, cs, cs);
+  c.strokeStyle = rgb(shade(1.45), 0.8);
+  c.lineWidth = Math.max(1, size * 0.028);
+  c.strokeRect(co + 0.5, co + 0.5, cs - 1, cs - 1);
+  // チップの左上に小さなハイライト。これがあると「面」として見える。
+  c.fillStyle = "rgba(255,255,255,0.20)";
+  c.fillRect(co + 1, co + 1, Math.max(1, cs * 0.34), Math.max(1, cs * 0.12));
 
   spriteCache[key] = s;
   return s;
@@ -743,6 +765,7 @@ function init() {
   bigTop = makeGrid(0);
   score = 0;
   squaresCleared = 0;
+  erasedCells = 0;
   combo = 0;
   maxCombo = 0;
   level = 1;
@@ -784,6 +807,7 @@ function spawnPiece() {
   lockTimer = 0; lockResets = 0; lockLowest = -99;
   holdTimer = holdMs();
   while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
+  seqPos = (seqPos + 1) % SEQ_LEN;
   drawNext();
   // 待機エリアまで埋まって、新しいコマを置く場所が無くなったら終了。
   // 参考動画でも、枠の上に2行ぶん積み上がったところでゲームオーバーになる。
@@ -1168,6 +1192,7 @@ function resolveSweep() {
     combo++;
     if (combo > maxCombo) maxCombo = combo;
     squaresCleared += sweepCleared / 4;
+    erasedCells += sweepCleared;
 
     const mult = multOf(combo - 1);   // combo++ 済みなので1つ戻して数える
     let pts = Math.round(sweepBase * mult * levelMult());
@@ -1302,6 +1327,7 @@ function triggerBurst() {
   const pts = Math.round((cells.length * 30 + bigBonus) * levelMult());
   score += pts;
   squaresCleared += cells.length / 4;
+  erasedCells += cells.length;
 
   Effects.screenFlash(0.9);
   Effects.screenShake(14);
@@ -1318,8 +1344,13 @@ function triggerBurst() {
 
 // ===== HUD =====
 function updateHud() {
-  scoreEl.textContent = score;
-  squaresEl.textContent = Math.floor(squaresCleared);
+  scoreEl.textContent = score.toLocaleString();
+  if (squaresEl) squaresEl.textContent = Math.floor(squaresCleared);
+  if (erasedEl) erasedEl.textContent = erasedCells.toLocaleString();
+  if (hiScoreEl) {
+    const best = loadRanking()[0];
+    hiScoreEl.textContent = Math.max(score, best ? best.score : 0).toLocaleString();
+  }
   // HUD の COMBO も盤面のハイライトと同じ琥珀にして、両者が同じ状態を指すようにする
   comboEl.textContent = combo;
   comboEl.style.color = chaining() ? rgbaOf(HL_CHAIN, 1) : "";
@@ -1539,21 +1570,19 @@ function drawHoldArea() {
   ctx.save();
   // 盤面より暗くして「外側」だと分かるようにする
   ctx.fillStyle = sk
-    ? `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.34)`
-    : "rgba(6,8,18,0.30)";
+    ? `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.10)`
+    : "rgba(6,8,18,0.18)";
   ctx.fillRect(0, 0, w, h);
   // 盤面との境界。ここを越えたら固定されるという線。
-  const line = sk ? `rgba(${sk.line[0]},${sk.line[1]},${sk.line[2]},0.55)`
-                  : "rgba(140,210,255,0.45)";
-  ctx.strokeStyle = line;
-  ctx.lineWidth = 2;
-  ctx.setLineDash([7, 6]);
-  ctx.beginPath(); ctx.moveTo(0, h - 1); ctx.lineTo(w, h - 1); ctx.stroke();
-  ctx.setLineDash([]);
+  // 枠の上端。参考画面と同じく実線1本にする（CSS の左右下の枠と繋がる）
+  ctx.strokeStyle = sk ? "rgba(255,255,255,0.55)" : "rgba(140,210,255,0.45)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, h - 0.5); ctx.lineTo(w, h - 0.5); ctx.stroke();
   ctx.restore();
 }
 
 function render() {
+  drawFloor();
   const shk = Effects.getShake();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
@@ -1572,15 +1601,26 @@ function render() {
   if (isRemaster()) {
     // REMASTER: 盤面は「半透明の暗いパネル + セル全部を区切る細いグリッド」。
     // 参考動画と同じく、空きマスの位置が常に読めるようにする。
+    // 参考画面の盤面は「背景の絵がはっきり透ける半透明の面 + スキン色の
+    // 細いグリッド + 交点の小さな点」。暗幕を濃くしすぎると絵が死ぬので薄く。
     const sk = Effects.skin();
-    ctx.fillStyle = `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.62)`;
+    ctx.fillStyle = `rgba(${sk.ink[0]},${sk.ink[1]},${sk.ink[2]},0.30)`;
     ctx.fillRect(0, 0, COLS * CELL, ROWS * CELL);
-    ctx.strokeStyle = `rgba(${sk.grid[0]},${sk.grid[1]},${sk.grid[2]},0.13)`;
+    ctx.strokeStyle = `rgba(${sk.line[0]},${sk.line[1]},${sk.line[2]},0.42)`;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let x = 1; x < COLS; x++) { ctx.moveTo(x * CELL + 0.5, 0); ctx.lineTo(x * CELL + 0.5, ROWS * CELL); }
     for (let y = 1; y < ROWS; y++) { ctx.moveTo(0, y * CELL + 0.5); ctx.lineTo(COLS * CELL, y * CELL + 0.5); }
     ctx.stroke();
+    // 交点の点
+    ctx.fillStyle = `rgba(${sk.line[0]},${sk.line[1]},${sk.line[2]},0.75)`;
+    const dr = Math.max(1, CELL * 0.045);
+    for (let x = 1; x < COLS; x++)
+      for (let y = 1; y < ROWS; y++) {
+        ctx.beginPath();
+        ctx.arc(x * CELL, y * CELL, dr, 0, Math.PI * 2);
+        ctx.fill();
+      }
   } else {
     // 盤面のうっすら暗幕
     ctx.fillStyle = "rgba(8,10,26,0.42)";
@@ -1818,28 +1858,82 @@ function render() {
 }
 
 // NEXT は横並びで2手ぶん。次の次は一回り小さく描いて優先度の差を出す。
+// 次のコマは盤面の真上に1つだけ大きく出す（参考画面と同じ）。
+// その先の3つは左レールへ縦に並べる。
+function drawPiece(c, cells, ox, oy, sz, alpha = 1) {
+  c.globalAlpha = alpha;
+  for (let r = 0; r < 2; r++)
+    for (let k = 0; k < 2; k++) {
+      c.drawImage(blockSprite(cells[r][k], sz), ox + k * sz, oy + r * sz);
+      const cm = cells.chain;
+      if (cm && cm[0] === r && cm[1] === k)
+        drawChainMark(c, ox + k * sz, oy + r * sz, sz, alpha);
+    }
+  c.globalAlpha = 1;
+}
+
 function drawNext() {
-  const w = nextCanvas.width, h = nextCanvas.height;
-  nextCtx.clearRect(0, 0, w, h);
-  const s1 = Math.floor(h / 2);                 // 次
-  const s2 = Math.floor(s1 * 0.66);             // 次の次
-  const gap = Math.max(6, Math.round(w * 0.06));
-  const total = s1 * 2 + gap + s2 * 2;
-  let ox = Math.round((w - total) / 2);
-  for (let i = 0; i < Math.min(NEXT_VIEW, nextQueue.length); i++) {
-    const cells = nextQueue[i], sz = i === 0 ? s1 : s2;
-    const oy = Math.round((h - sz * 2) / 2);
-    nextCtx.globalAlpha = i === 0 ? 1 : 0.55;
-    for (let r = 0; r < 2; r++)
-      for (let c = 0; c < 2; c++) {
-        nextCtx.drawImage(blockSprite(cells[r][c], sz), ox + c * sz, oy + r * sz);
-        const cm = cells.chain;
-        if (cm && cm[0] === r && cm[1] === c)
-          drawChainMark(nextCtx, ox + c * sz, oy + r * sz, sz, i === 0 ? 1 : 0.6);
-      }
-    ox += sz * 2 + gap;
+  if (queueCtx) {
+    const w = queueCanvas.width, h = queueCanvas.height;
+    queueCtx.clearRect(0, 0, w, h);
+    const n = Math.max(1, NEXT_VIEW);
+    const slot = h / n;
+    const sz = Math.floor(Math.min(w, slot * 0.82) / 2);
+    for (let i = 0; i < Math.min(NEXT_VIEW, nextQueue.length); i++) {
+      const oy = Math.round(i * slot + (slot - sz * 2) / 2);
+      drawPiece(queueCtx, nextQueue[i], Math.round((w - sz * 2) / 2), oy, sz,
+                1 - i * 0.16);
+    }
   }
-  nextCtx.globalAlpha = 1;
+  renderSeqStrip();
+}
+
+// 盤面の上の「1─2─3…8」。何コマ目かを示す参考画面の帯を再現する。
+const SEQ_LEN = 8;
+let seqPos = 0;
+function renderSeqStrip() {
+  if (!seqStripEl) return;
+  if (seqStripEl.childElementCount !== SEQ_LEN) {
+    seqStripEl.innerHTML = "";
+    for (let i = 0; i < SEQ_LEN; i++) {
+      const li = document.createElement("li");
+      li.className = "seq-cell";
+      li.textContent = String(i + 1);
+      seqStripEl.appendChild(li);
+    }
+  }
+  const kids = seqStripEl.children;
+  for (let i = 0; i < kids.length; i++)
+    kids[i].classList.toggle("on", i === seqPos % SEQ_LEN);
+}
+
+// 盤面の下の床。参考画面と同じく、下2行を鏡像で映して遠近を付ける。
+function drawFloor() {
+  if (!floorCtx) return;
+  const w = floorCanvas.width, h = floorCanvas.height;
+  floorCtx.clearRect(0, 0, w, h);
+  const rows = 2;
+  const sc = w / (COLS * CELL);
+  floorCtx.save();
+  floorCtx.scale(sc, 1);
+  for (let i = 0; i < rows; i++) {
+    const y = ROWS - 1 - i;                 // 下から順に
+    const dy = i * (h / rows / sc);
+    const sq = (h / rows) / sc;
+    for (let x = 0; x < COLS; x++) {
+      if (board[y][x] === EMPTY) continue;
+      floorCtx.save();
+      // 遠くほど小さく・薄く。左右は中央へ寄せて奥行きを出す。
+      const t = i / rows;
+      floorCtx.globalAlpha = 0.30 * (1 - t * 0.7);
+      const shrink = 1 - t * 0.12;
+      const cx = COLS * CELL / 2;
+      floorCtx.translate(cx + (x * CELL - cx) * shrink, dy);
+      floorCtx.drawImage(blockSprite(board[y][x], CELL), 0, 0, CELL, sq);
+      floorCtx.restore();
+    }
+  }
+  floorCtx.restore();
 }
 
 // ===== 背景リサイズ =====
