@@ -441,7 +441,10 @@ TARGET_RMS = {
 
 
 def export(s, target_peak=0.94):
-    d = os.path.join(OUT_ROOT, s.name)
+    # 原音の WAV は stems/ に置く（.gitignore の対象。配信には使わない）。
+    # tools/master.py が仕上げ直して stems_master/ を作り、
+    # tools/encode.py がそれを m4a/ogg にする。
+    d = os.path.join(OUT_ROOT, s.name, "stems")
     os.makedirs(d, exist_ok=True)
     # 1) 層ごとに狙いの RMS へそろえ、突出したピークだけ抑える。
     #    リミッタを通すと RMS が下がるので、2回まわして狙い値に寄せる。
@@ -469,7 +472,7 @@ def export(s, target_peak=0.94):
     print(f"   MIX        peak {np.abs(mix).max():.3f} rms {r:.4f} "
           f"crest {20*np.log10(np.abs(mix).max()/max(r,1e-9)):.1f} dB "
           f"継ぎ目 {float(np.abs(mix[-1]-mix[0]).max()):.4f}")
-    write_wav(os.path.join(d, "loop.wav"), mix)
+    write_wav(os.path.join(OUT_ROOT, s.name, "loop.wav"), mix)
     return mix
 
 

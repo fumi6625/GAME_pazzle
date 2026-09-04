@@ -20,6 +20,7 @@ ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 STEMS = ["01_drums", "02_bass", "03_chords", "04_melody", "05_atmos"]
 
 # (曲名, wav の置き場, 配信用の置き場, ループ本体の名前)
+# stems_master/ があればそちらを使う（tools/master.py で仕上げ直したもの）。
 TRACKS = [
     ("PRISM_SHUFFLE", ROOT + "/stems", ROOT + "/stems_web", ROOT + "/PRISM_SHUFFLE_loop"),
     ("NEON_MARCH", ROOT + "/NEON_MARCH/stems", ROOT + "/NEON_MARCH/stems_web",
@@ -43,6 +44,9 @@ def main():
     for name, wav_dir, web_dir, loop_base in TRACKS:
         if only and name not in only:
             continue
+        mastered = wav_dir + "_master" if wav_dir.endswith("stems") else None
+        if mastered and os.path.isdir(mastered):
+            wav_dir = mastered            # 仕上げ直したほうを配信する
         if not os.path.isdir(wav_dir):
             print(f"[skip] {name}: {wav_dir} が無い（compose.py を先に実行）")
             continue
@@ -52,14 +56,16 @@ def main():
             src = os.path.join(wav_dir, s + ".wav")
             enc(src, os.path.join(web_dir, s))
             tot += sum(os.path.getsize(os.path.join(web_dir, s + e)) for e in (".m4a", ".ogg"))
-        lw = loop_base + ".wav"
+        lw = os.path.join(wav_dir, "loop.wav")
+        if not os.path.exists(lw):
+            lw = loop_base + ".wav"
         if os.path.exists(lw):
             subprocess.run([FF, "-v", "error", "-y", "-i", lw, "-c:a", "aac", "-b:a", "192k",
                             "-movflags", "+faststart", loop_base + ".m4a"], check=True)
             subprocess.run([FF, "-v", "error", "-y", "-i", lw, "-c:a", "libvorbis", "-q:a", "5",
                             loop_base + ".ogg"], check=True)
             tot += sum(os.path.getsize(loop_base + e) for e in (".m4a", ".ogg"))
-        print(f"{name:14s} 配信用 {tot/1e6:5.1f} MB")
+        print(f"{name:14s} 元 {os.path.relpath(wav_dir, ROOT)}  配信用 {tot/1e6:5.1f} MB")
 
 
 if __name__ == "__main__":
