@@ -138,14 +138,18 @@
             <div class="stat"><span class="stat-label">ERASED</span>
               <span class="stat-chev" aria-hidden="true">⌄</span>
               <span id="erased" class="stat-value">0</span></div>
-            <div class="stat stat-small"><span class="stat-label">COMBO</span>
-              <span id="combo" class="stat-value">0</span></div>
-            <div class="burst-wrap">
-              <span class="stat-label">BURST</span>
-              <div class="burst-bar"><div id="burst-fill" class="burst-fill"></div></div>
-              <span id="burst-ready" class="burst-ready hidden">READY</span>
-              <span id="slow-left" class="slow-left hidden">CHRONO 00.0s</span>
-            </div>
+          </div>
+          <!-- COMBO は盤面のバナーで大きく出るので、レールには置かない
+               （参考画面も LEVEL/TIME/SCORE/HI-SCORE/ERASED の5項目だけ）。
+               値だけは読み取り用に残しておく。 -->
+          <span id="combo" hidden>0</span>
+
+          <!-- BURST のたまり具合はボタンの直上の細いバーで示す。
+               満タンになるとボタン自体が光る。 -->
+          <div class="burst-wrap">
+            <div class="burst-bar"><div id="burst-fill" class="burst-fill"></div></div>
+            <span id="burst-ready" class="burst-ready hidden">BURST READY</span>
+            <span id="slow-left" class="slow-left hidden">CHRONO 00.0s</span>
           </div>
 
           <!-- 作者の指示どおり、BURST を回転ボタンの上に置く -->

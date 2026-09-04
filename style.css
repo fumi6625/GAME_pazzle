@@ -99,20 +99,29 @@ body {
    参考画面（ルミネス リマスター / モバイル）の骨格をそのまま写す。
    左レール（次のコマ・左右移動）／中央（盤面）／右レール（スコア・操作）。
    PC もスマホも同じ骨格で、寸法だけを画面サイズに合わせて変える。 */
-/* 参考画面の縦横比（およそ 2.18:1）に切り出してから中身を組む。
-   こうしないと、画面の縦横比が変わるたびに盤面とレールの割合が崩れて
-   「同じ画面」に見えなくなる。余った側は背景がそのまま見える。 */
+/* 既定は画面いっぱい。参考画面の比率で「切り出す」のは PC だけにする。
+   スマホの横持ちは 1.78〜2.17:1 しかなく、2.18:1 に切り出すと
+   縦を最大18%捨てることになり、そのぶん操作ボタンが押せない大きさになる。
+   （実測: iPhone SE で回転ボタンが 5.3mm。指針の 7mm を大きく下回っていた） */
 .game-area {
   position: relative;
   z-index: 2;
-  --ar: 2.18;
-  width: min(100vw, calc(100dvh * var(--ar)));
-  height: min(100dvh, calc(100vw / var(--ar)));
+  width: 100vw;
+  height: 100dvh;
   max-width: none;
-  margin: auto;
+  margin: 0;
   padding: 0;
   display: flex;
-  container-type: size;
+}
+@media (hover: hover) and (pointer: fine) {
+  /* PC はタッチの制約が無いので、参考画面の比率どおりに切り出す */
+  .game-area {
+    --ar: 2.18;
+    width: min(100vw, calc(100dvh * var(--ar)));
+    height: min(100dvh, calc(100vw / var(--ar)));
+    margin: auto;
+    container-type: size;
+  }
 }
 
 .layout {
@@ -127,12 +136,14 @@ body {
   /* 盤面の縦横比（16:12）とレールの幅から、全体の基準寸法を決める。
      --cell が1マスの表示サイズ。ここを変えると全部が連動して伸縮する。 */
   /* 参考画面の実測: 盤面は画面高の 27%〜90%（＝63%）。10行なのでセルは 6.3dvh。
-     横は画面幅の 25%〜75%（＝50%）で 16列 → セルは 3.1vw。狭い方に合わせる。 */
-  --cell: min(6.3cqh, 3.1cqw);
+     レールは「指で押せる幅」を先に確保し、盤面は残った幅に収める。
+     縦長寄りの端末では盤面が相対的に横へ広がるが、
+     ボタンが押せなくなるよりはそちらを優先する。 */
+  --rail-l: clamp(128px, 13vw, 180px);
+  --rail-r: clamp(140px, 16vw, 244px);
+  --cell: min(6.3dvh, calc((100vw - var(--rail-l) - var(--rail-r) - 18px) / 16));
   --board-w: calc(var(--cell) * 16);
   --board-h: calc(var(--cell) * 10);      /* 枠の中は10行。待機2行は枠の上へはみ出す */
-  --rail-l: clamp(64px, 11vw, 168px);
-  --rail-r: clamp(104px, 15vw, 230px);
   --line: rgba(255, 255, 255, 0.55);
 }
 
@@ -239,7 +250,7 @@ body {
   margin: 0;
   padding: 0;
   border: 0;
-  height: 27cqh;
+  height: 27dvh;
 }
 /* 盤面の上のひし形の列（参考画面の ◆ ◆ ◆ …） */
 .diamonds {
@@ -384,7 +395,7 @@ body {
 .floor {
   display: block;
   width: var(--board-w);
-  height: calc(var(--cell) * 1.5);
+  height: calc(var(--cell) * 1.2);
   flex: 0 0 auto;
   opacity: 0.55;
   mask-image: linear-gradient(rgba(0,0,0,0.9), rgba(0,0,0,0));
@@ -418,8 +429,21 @@ body {
   gap: 3px;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
   padding: 0;
   text-shadow: 0 0 10px rgba(0, 0, 0, 0.9);
+  /* 5項目が必ず収まるように、文字の大きさを HUD の高さから決める。
+     画面の高さ(dvh)を基準にすると、ボタンの実寸を確保したあとの
+     「残り」がどれだけかは分からないので、必ずどこかで溢れる。 */
+  container-type: size;
+}
+.hud .stat, .hud .burst-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
 }
 .hud .stat {
   position: relative;
@@ -430,8 +454,8 @@ body {
 }
 .hud .stat-label {
   display: block;
-  padding: 2px 7px;
-  font-size: clamp(7px, 1.25dvh, 12px);
+  padding: 1px 7px;
+  font-size: min(5.2cqh, 12px);
   font-weight: 600;
   letter-spacing: 0.16em;
   color: #eaf6ff;
@@ -442,17 +466,18 @@ body {
 }
 .hud .stat-value {
   display: block;
-  padding: 0 6px 1px 0;
+  padding: 0 6px 0 0;
   text-align: right;
   font-family: var(--num);
   font-variant-numeric: tabular-nums;
-  font-size: clamp(13px, 2.6cqh, 26px);
+  font-size: min(11cqh, 26px);
   font-weight: 400;
-  line-height: 1.15;
+  line-height: 1.1;
   color: #fff;
 }
+/* 「x1.0」「NEXT 2,000」は縦に余裕があるときだけ出す */
 .hud .stat-sub {
-  display: block;
+  display: none;
   text-align: right;
   padding-right: 6px;
   font-size: clamp(6px, 1.05dvh, 10px);
@@ -468,35 +493,42 @@ body {
 }
 .stat-icon { top: 58%; right: auto; left: 6px; }
 .stat-chev { top: 58%; right: auto; left: 6px; }
-.hud .level-bar { height: 2px; margin: 1px 0; background: rgba(255,255,255,0.10); }
+.hud .level-bar { height: 2px; margin: 1px 6px 1px 0; background: rgba(255,255,255,0.10); }
 
 .burst-wrap {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 0 0 auto;
+  margin-top: auto;        /* スコア表示とボタンの間に置く */
   padding-top: 2px;
   border-top: 0;
 }
-.burst-wrap .stat-label {
-  padding: 1px 6px;
+.burst-bar { height: 4px; }
+.burst-ready, .slow-left {
   font-size: clamp(7px, 1.2dvh, 11px);
-  background: linear-gradient(90deg, rgba(255,92,200,0.24), rgba(255,255,255,0.05));
-  border: 1px solid rgba(255, 140, 210, 0.3);
+  text-align: center;
+  letter-spacing: 0.08em;
 }
-.burst-bar { height: 3px; }
-.burst-ready, .slow-left { font-size: clamp(6px, 1.05dvh, 10px); }
+/* 満タンのときは BURST A のボタン自体を光らせる */
+.tbtn-a.ready {
+  color: #fff;
+  background: rgba(255, 92, 200, 0.30);
+  border-color: #ff7ad2;
+  box-shadow: 0 0 16px rgba(255, 92, 200, 0.6);
+}
 
 /* --- 右レール: 操作ボタン（BURST → 回転 → 即落下）--- */
 .toptouch {
   display: flex;
-  gap: 5px;
+  gap: 8px;
   justify-content: flex-end;
   flex: 0 0 auto;
 }
 .touchpad {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 5px;
+  gap: 8px;
   width: 100%;
   flex: 0 0 auto;
   margin-top: 5px;
@@ -504,7 +536,7 @@ body {
 .touchpad .tbtn-hard { grid-column: 1 / -1; }
 .movepad {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   flex: 0 0 auto;
   margin: auto 0 6px;      /* 左レールの中ほど〜下に置く */
@@ -1013,19 +1045,25 @@ kbd {
   transform: scale(0.97);
 }
 .hidden { display: none !important; }
-.tbtn { min-height: clamp(26px, 5.4cqh, 54px); font-size: clamp(10px, 2cqh, 20px); }
-.tbtn-sm { min-height: clamp(20px, 3.6cqh, 34px); min-width: clamp(26px, 4.4vw, 44px);
-           font-size: clamp(9px, 1.6cqh, 15px); }
-.tbtn-rot { min-height: clamp(34px, 7.4cqh, 78px); font-size: clamp(16px, 3.4cqh, 34px);
+/* 実寸の下限。Apple HIG 44pt(≒7mm) を最低ラインに、親指で速く押す
+   ボタン（回転・移動）は 9mm(≒56pt) 以上を確保する。
+   ここを画面比率（dvh/dvh）で書くと、小さい端末で必ず基準を割る。 */
+.tbtn { min-height: clamp(52px, 11dvh, 68px); font-size: clamp(11px, 2.4dvh, 20px); }
+.tbtn-sm { min-height: clamp(48px, 10dvh, 60px); min-width: clamp(48px, 5vw, 64px);
+           font-size: clamp(11px, 2dvh, 16px); }
+.tbtn-rot { min-height: clamp(64px, 15dvh, 96px); font-size: clamp(20px, 5dvh, 36px);
             color: #ffd98a; border-color: rgba(255, 200, 110, 0.5); }
-.tbtn-hard { min-height: clamp(26px, 5cqh, 50px); font-size: clamp(13px, 2.6cqh, 26px); }
+.tbtn-hard { min-height: clamp(54px, 12dvh, 72px); font-size: clamp(15px, 3dvh, 26px); }
 .tbtn-a { color: var(--accent-2); border-color: rgba(255, 120, 200, 0.5); }
+.tbtn-a, .tbtn-b { white-space: nowrap; letter-spacing: 0.02em;
+                   font-size: clamp(9px, 1.9dvh, 15px); }
 .tbtn-b { color: var(--accent); }
 /* 参考画面の左右移動は「大きな半透明のシェブロン」。枠は付けない。 */
 .mbtn {
   flex: 1 1 0;
-  min-height: clamp(38px, 11cqh, 110px);
-  font-size: clamp(26px, 7cqh, 72px);
+  min-width: 48px;
+  min-height: clamp(72px, 18dvh, 130px);
+  font-size: clamp(28px, 8dvh, 72px);
   font-weight: 200;
   color: rgba(190, 232, 255, 0.72);
   background: none;
@@ -1067,6 +1105,76 @@ kbd {
 }
 .tut.hidden { display: none; }
 .tut-quit { pointer-events: auto; }
-.tut-title { font-size: clamp(9px, 1.7cqh, 15px); }
-.tut-body { margin-top: 3px; font-size: clamp(8px, 1.5cqh, 13px); line-height: 1.45; }
-.tut-goal { margin-top: 4px; font-size: clamp(8px, 1.5cqh, 13px); }
+.tut-title { font-size: clamp(9px, 1.7dvh, 15px); }
+.tut-body { margin-top: 3px; font-size: clamp(8px, 1.5dvh, 13px); line-height: 1.45; }
+.tut-goal { margin-top: 4px; font-size: clamp(8px, 1.5dvh, 13px); }
+
+/* ===== 縦が短い横持ち端末（iPhone SE など 400pt 未満） =====
+   操作ボタンの実寸を優先し、情報のほうを詰める。 */
+@media (pointer: coarse) and (max-height: 400px) {
+  .hud { gap: 0; }
+  .hud .stat-label { padding: 0 5px; font-size: 7.5px; letter-spacing: 0.08em; }
+  .hud .stat-value { font-size: 14px; line-height: 1.05; padding-bottom: 0; }
+  .hud .stat-sub, .hud .level-bar { display: none; }
+  .burst-wrap { padding-top: 0; gap: 1px; }
+  .burst-ready, .slow-left { font-size: 7px; }
+  .burst-ready, .slow-left { display: none; }
+  .queue { height: calc(var(--cell) * 6.2); }
+  .mascot { display: none; }
+  .next-label { font-size: 8px; }
+}
+
+/* ===== PC は参考画面の比率で切り出す =====
+   .game-area を 2.18:1 に切り出す都合上、盤面の寸法も
+   ビューポートではなく「切り出した箱」を基準に取り直す必要がある
+   （cqh/cqw = .game-area の高さ/幅の1%）。 */
+@media (hover: hover) and (pointer: fine) {
+  .layout {
+    --rail-l: clamp(106px, 11cqw, 172px);
+    --rail-r: clamp(140px, 15.5cqw, 244px);
+    --cell: min(6.3cqh, 3.1cqw);
+  }
+  .board-top { height: 27cqh; }
+}
+
+/* 縦に余裕がある画面でだけ、レベルの補助表示を出す */
+@media (min-height: 620px) {
+  .hud .stat-sub { display: block; font-size: min(4cqh, 10px); }
+}
+
+/* ===== スタート／ゲームオーバーの画面 =====
+   盤面の枠の中だけに置くと、横持ちのスマホ（高さ 375〜430pt）では
+   高さが 245px しか取れず、START や「ホームへ」がスクロールの外へ出る。
+   画面全体に広げて、必ず1画面に収める。 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.overlay-inner {
+  max-height: 100dvh;
+  padding: calc(8px + env(safe-area-inset-top)) 16px
+           calc(8px + env(safe-area-inset-bottom));
+  gap: 0;
+}
+/* ボタンは指で押せる大きさを守る（Apple HIG 44pt / 実測 7mm 以上） */
+.start-btn {
+  min-height: 48px;
+  min-width: 132px;
+  padding: 10px 22px;
+}
+.mode-btns { gap: 10px; }
+
+/* 横持ちで縦が短いときは、読み物を削ってボタンを確実に見せる */
+@media (pointer: coarse) and (max-height: 460px) {
+  .overlay-kicker { font-size: 8px; }
+  .overlay-title { font-size: 20px; margin-top: 0; }
+  .overlay-sub { font-size: 11px; margin-top: 2px; }
+  .overlay-hint { margin-top: 6px; font-size: 9px; }
+  .picker { margin-top: 6px; }
+  .picker-desc { display: none; }
+  .rank-panel { margin-top: 6px; }
+  .rank-list { max-height: 74px; }
+  .rank-title { font-size: 8px; }
+  .start-btn { margin-top: 8px; font-size: 11px; letter-spacing: 0.18em; }
+}

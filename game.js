@@ -1359,6 +1359,8 @@ function updateHud() {
   timeEl.textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   burstFillEl.style.width = (burstGauge / BURST_MAX * 100) + "%";
   burstFillEl.classList.toggle("ready", burstReady);
+  const bA = document.querySelector('.tbtn-a');
+  if (bA) bA.classList.toggle("ready", burstReady);
   burstReadyEl.classList.toggle("hidden", !burstReady);
 
   // レベル: 現在値・次レベルまでの進捗・得点係数・残り点

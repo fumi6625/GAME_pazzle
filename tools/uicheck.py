@@ -18,10 +18,22 @@ CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 SIZES = sys.argv[1:] or ["1568x720", "932x430", "1440x900"]
 
 # (名前, 下限, 上限) — 画面幅/高さに対する割合
+# 右端の下限が 0.70 なのは、参考画面の実測値（幅49% / 高さ63%）が
+# セルをきっちり正方形にすると両立しないため。こちらは正方形を優先し、
+# 盤面は参考より 1% ほど細くなる。
 RULES = {
-    "盤面の左端": (0.23, 0.29), "盤面の右端": (0.71, 0.78),
+    "盤面の左端": (0.23, 0.29), "盤面の右端": (0.70, 0.78),
     "盤面の上端": (0.23, 0.31), "盤面の下端": (0.87, 0.94),
     "左レールの幅": (0.06, 0.16), "右レールの幅": (0.11, 0.19),
+}
+# 小さい端末（iPhone SE 横持ち = 667pt など）では、指の大きさは変わらないのに
+# 画面だけが狭くなる。レールは実寸で決まるので、割合としては太くなるのが正しい。
+# ここを参考画面の割合に合わせると、ボタンが押せない大きさに戻ってしまう。
+NARROW = 780
+RULES_NARROW = {
+    "盤面の左端": (0.18, 0.29), "盤面の右端": (0.66, 0.82),
+    "盤面の上端": (0.23, 0.31), "盤面の下端": (0.87, 0.94),
+    "左レールの幅": (0.06, 0.22), "右レールの幅": (0.11, 0.24),
 }
 
 
@@ -44,7 +56,10 @@ def check(pg, W, H, touch):
         "左レールの幅": lr["w"] / W, "右レールの幅": rr["w"] / W,
     }
     ok = True
-    for k, (lo, hi) in RULES.items():
+    rules = RULES_NARROW if W < NARROW else RULES
+    if rules is RULES_NARROW:
+        print("  （小さい端末なので、指の大きさを優先した緩い基準で判定）")
+    for k, (lo, hi) in rules.items():
         v = got[k]
         good = lo <= v <= hi
         ok &= good
@@ -75,6 +90,22 @@ def check(pg, W, H, touch):
             ok &= o1 and o2
         else:
             print("  操作ボタンが見つからない × NG"); ok = False
+
+    # スコア表示と操作ボタンが重なっていないか（縦が短い端末で起きやすい）
+    lap = pg.evaluate("""() => {
+        const h=document.querySelector('.hud'), t=document.querySelector('.touchpad');
+        if(!h||!t) return null;
+        const a=h.getBoundingClientRect(), b=t.getBoundingClientRect();
+        return {gap: b.top - a.bottom,
+                cut: [...h.querySelectorAll('.stat')].filter(e=>{
+                  const r=e.getBoundingClientRect(); return r.bottom > a.bottom + 2; })
+                  .map(e=>e.querySelector('.stat-label').textContent.trim())}; }""")
+    if lap:
+        good = lap["gap"] >= -1 and not lap["cut"]
+        print(f"  スコア表示と操作ボタン すき間 {lap['gap']:.0f}px"
+              + (f" / 切れている項目: {', '.join(lap['cut'])}" if lap["cut"] else "")
+              + f"  {'OK' if good else '× NG'}")
+        ok &= good
 
     # はみ出しは .game-area の枠を基準に見る（レターボックスの外は背景）
     over = pg.evaluate("""() => {
