@@ -1047,3 +1047,26 @@ kbd {
   .mascot { display: none; }
   .track-line { font-size: 8px; }
 }
+
+/* ===== チュートリアルの説明パネル（新レイアウト用） =====
+   3列レイアウトでは中央カラムに縦の余白がないので、盤面の下端へ重ねる。
+   クリックは下へ通すので、読みながらそのまま操作できる。 */
+.tut {
+  position: absolute;
+  left: 50%;
+  bottom: 2%;
+  transform: translateX(-50%);
+  width: min(92%, calc(var(--cell) * 16));
+  margin: 0;
+  padding: 6px 10px;
+  background: rgba(4, 10, 20, 0.86);
+  border: 1px solid rgba(140, 210, 255, 0.35);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 14;
+}
+.tut.hidden { display: none; }
+.tut-quit { pointer-events: auto; }
+.tut-title { font-size: clamp(9px, 1.7cqh, 15px); }
+.tut-body { margin-top: 3px; font-size: clamp(8px, 1.5cqh, 13px); line-height: 1.45; }
+.tut-goal { margin-top: 4px; font-size: clamp(8px, 1.5cqh, 13px); }
