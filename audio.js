@@ -72,8 +72,20 @@ const GameAudio = (() => {
       bpm: 112, semis: -1, base: "PRISM_SHUFFLE/CIRCUIT_RUSH/", loop: "loop" },
     { id: "GLASS_TIDE", title: "GLASS TIDE", genre: "ダウンテンポ・ダブ",
       bpm: 84, semis: -3, base: "PRISM_SHUFFLE/GLASS_TIDE/", loop: "loop" },
+    // 作者の好きな3曲（129.2 / 107.7 / 139.7 BPM）と同じテンポ帯で書き下ろした2曲。
+    // 参考曲の「打点/持続 比」に届かせるため、パッドを使わず刻みで組んである。
+    { id: "SODA_DRIFT", title: "SODA DRIFT", genre: "ビッグビート・ファンク",
+      bpm: 128, semis: 2, gain: 0.978,
+      base: "PRISM_SHUFFLE/SODA_DRIFT/", loop: "loop" },
+    { id: "CHROME_SPRINT", title: "CHROME SPRINT", genre: "ファンク・ブレイクス",
+      bpm: 140, semis: 0, gain: 0.974,
+      base: "PRISM_SHUFFLE/CHROME_SPRINT/", loop: "loop" },
   ];
+  // gain: 曲ごとの音量の微調整。仕上げ直しはピーク基準なので、曲によって
+  // ラウドネスが 0.5dB ほど残る（実測 -11.95〜-12.53 LUFS）。曲が変わるたびに
+  // 音量が跳ねると疲れるので、ここで -12.2 LUFS へ揃える。
   TRACKS.forEach((t) => {
+    if (t.gain === undefined) t.gain = 1;
     t.spb = 60 / t.bpm;
     t.step = t.spb / 4;
     t.bar = t.spb * 4;
@@ -225,7 +237,7 @@ const GameAudio = (() => {
     comp.attack.value = 0.004; comp.release.value = 0.16;
     master.connect(comp); comp.connect(ctx.destination);
 
-    musicBus = ctx.createGain(); musicBus.gain.value = HEADROOM;
+    musicBus = ctx.createGain(); musicBus.gain.value = HEADROOM * T().gain;
     musicBus.connect(master);
     sfxBus = ctx.createGain(); sfxBus.gain.value = 0.85;
     sfxBus.connect(master);
@@ -457,6 +469,13 @@ const GameAudio = (() => {
       }
       trackIdx = n;
       if (bufs) stemBufs = bufs;
+      // 曲ごとの音量差はここで吸収する。ステムのゲインは層の出し入れ（0/1）に
+      // 使っているので、曲全体の調整は音楽バス側で行う。
+      if (musicBus) {
+        musicBus.gain.cancelScheduledValues(t0);
+        musicBus.gain.setValueAtTime(musicBus.gain.value, t0);
+        musicBus.gain.linearRampToValueAtTime(HEADROOM * next.gain, t0 + fade);
+      }
       if (started) {
         if (usingFallback) {
           if (fallbackEl) {
@@ -493,8 +512,10 @@ const GameAudio = (() => {
     get loopSeconds() { return T().loopSec; },
     get sweepSeconds() { return T().sweepSec; },
     get trackIndex() { return trackIdx; },
-    get track() { const t = T(); return { id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, sweepSec: t.sweepSec }; },
-    get trackList() { return TRACKS.map((t) => ({ id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, semis: t.semis, sweepSec: t.sweepSec })); },
+    get track() { const t = T(); return { id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, gain: t.gain, sweepSec: t.sweepSec }; },
+    // 音楽バスの実効ゲイン（曲ごとの音量調整が効いているかの確認用）
+    get musicGain() { return musicBus ? musicBus.gain.value : 0; },
+    get trackList() { return TRACKS.map((t) => ({ id: t.id, title: t.title, genre: t.genre, bpm: t.bpm, semis: t.semis, gain: t.gain, sweepSec: t.sweepSec })); },
     get usingFallback() { return usingFallback; },
     get stemSource() { return stemSource; },
     get stemFrames() { const b = stemBufs["01_drums"]; return b ? b.length : 0; },

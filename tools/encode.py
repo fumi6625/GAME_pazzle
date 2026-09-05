@@ -29,6 +29,10 @@ TRACKS = [
      ROOT + "/CIRCUIT_RUSH/loop"),
     ("GLASS_TIDE", ROOT + "/GLASS_TIDE/stems", ROOT + "/GLASS_TIDE/stems_web",
      ROOT + "/GLASS_TIDE/loop"),
+    ("SODA_DRIFT", ROOT + "/SODA_DRIFT/stems", ROOT + "/SODA_DRIFT/stems_web",
+     ROOT + "/SODA_DRIFT/loop"),
+    ("CHROME_SPRINT", ROOT + "/CHROME_SPRINT/stems", ROOT + "/CHROME_SPRINT/stems_web",
+     ROOT + "/CHROME_SPRINT/loop"),
 ]
 
 
