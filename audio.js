@@ -49,6 +49,16 @@ const GameAudio = (() => {
   // 効果音との音量バランスを元と揃えている（差し引き 0.86 = -1.3 dB）。
   const HEADROOM = 0.86;
 
+  // 音素材の版番号。tools/master.py で曲を仕上げ直したとき、ファイル名は
+  // 同じままなので、一度でも遊んだブラウザは古い音をキャッシュから出し続ける。
+  // 実際「曲が変わっていない」という報告がこれだった。素材を差し替えたら
+  // 必ずこの数字を上げること。URL が変われば必ず取り直される。
+  // file:// で開いたときは付けない。クエリを解釈する層が無いので
+  // 「PRISM_SHUFFLE_loop.m4a?v=2」という名前のファイルを探しに行ってしまう。
+  const ASSET_VER = 2;
+  const CACHEBUST = location.protocol === "http:" || location.protocol === "https:";
+  const av = (u) => (CACHEBUST ? u + (u.includes("?") ? "&" : "?") + "v=" + ASSET_VER : u);
+
   // semis: 操作音の移調量（PRISM SHUFFLE の F を 0 とした半音差）。
   // 操作音は1セットしか持たないので、曲が変わったら再生レートで主音を合わせる。
   // 素材は C マイナーペンタトニック = F ドリアンの部分集合なので、
@@ -155,7 +165,7 @@ const GameAudio = (() => {
     if (!CODECS) CODECS = codecOrder();
     for (const [dir, ext] of CODECS) {
       try {
-        const r = await fetch(track.base + dir + n + ext);
+        const r = await fetch(av(track.base + dir + n + ext));
         if (!r.ok) continue;
         const buf = trimToLoop(await ctx.decodeAudioData(await r.arrayBuffer()), track);
         stemSource = ext;
@@ -193,7 +203,7 @@ const GameAudio = (() => {
 
   function setupFallback() {
     usingFallback = true;
-    fallbackEl = new Audio(T().base + T().loop + ".m4a");
+    fallbackEl = new Audio(av(T().base + T().loop + ".m4a"));
     fallbackEl.loop = true;
     fallbackEl.preload = "auto";
     try {
@@ -451,7 +461,7 @@ const GameAudio = (() => {
         if (usingFallback) {
           if (fallbackEl) {
             fallbackEl.pause();
-            fallbackEl.src = next.base + next.loop + ".m4a";
+            fallbackEl.src = av(next.base + next.loop + ".m4a");
             fallbackEl.play().catch(() => {});
           }
           startTime = ctx.currentTime;
