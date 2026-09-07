@@ -7,7 +7,11 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#04050a" />
   <title>LUMINA ARISE — ルミナス風パズル</title>
-  <link rel="stylesheet" href="style.css" />
+  <!-- style.css / game.js などは版番号を持たないファイル名で読み込んでいたため、
+       一度でも遊んだ端末はブラウザのキャッシュから古い CSS/JS を出し続けていた
+       （音楽ファイルで実際に踏んだのと同じ罠。tools/*.js の ASSET_VER と同じ考え方）。
+       内容を直したら、その都度ここの ?v= を上げること。 -->
+  <link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
   <div class="stage">
@@ -188,9 +192,9 @@
     </div>
   </div>
 
-  <script src="sfx-assets.js"></script>
-  <script src="effects.js"></script>
-  <script src="audio.js"></script>
-  <script src="game.js"></script>
+  <script src="sfx-assets.js?v=1"></script>
+  <script src="effects.js?v=3"></script>
+  <script src="audio.js?v=3"></script>
+  <script src="game.js?v=6"></script>
 </body>
 </html>
