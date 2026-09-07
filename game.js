@@ -809,9 +809,9 @@ function spawnPiece() {
   while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   seqPos = (seqPos + 1) % SEQ_LEN;
   drawNext();
-  // 待機エリアまで埋まって、新しいコマを置く場所が無くなったら終了。
-  // 参考動画でも、枠の上に2行ぶん積み上がったところでゲームオーバーになる。
-  if (collides(startX, -PAD_ROWS, current.cells)) endGame();
+  // ゲームオーバーは lockPiece() 側で判定する（枠に収まらないコマを
+  // 置いたとき＝はみ出しが起きたとき）。spawnPiece() の時点では
+  // 枠外は必ず空いているので、ここでの衝突判定は不要。
 }
 
 // ===== 衝突判定 =====
@@ -912,7 +912,16 @@ function lockPiece() {
   const { cx, cy } = cellCenter(current.x + 0.5, current.y + 1.5);
   Effects.burst(cx, cy + CELL * 0.4, "rgba(180,200,255,0.8)", 5, 0.4);
   current = null;
-  settleColumns();
+  const overflowed = settleColumns();
+  // 枠外にはみ出た＝最上段まで積み上がった状態で、さらにコマを置いた。
+  // ここでゲームオーバーにする（はみ出した分はすでに settleColumns() が削除済み）。
+  if (overflowed) {
+    Effects.screenFlash(0.6);
+    Effects.screenShake(10);
+    Effects.zone(0, padY(), COLS * CELL, CELL, "rgba(255,80,80,0.35)");
+    endGame();
+    return;
+  }
   const had = markMatches();
   if (had) GameAudio.playSquare();
   updateIntensity();
@@ -920,24 +929,36 @@ function lockPiece() {
 }
 
 // ===== 重力（全列詰め） =====
+// 枠の中（0..ROWS-1）に収まらないぶんは、枠外にはみ出たコマとして削除する。
+// 以前は枠の上の隠し2行にそのまま積み続けていたが、そこに積んだコマが
+// 「今まさに落ちているコマ」の左右移動を塞いでしまう不具合があった
+// （collides() は隠し行の中身も衝突として見るため）。
+// 戻り値は、この呼び出しで実際に削除が起きたか（＝はみ出したか）。
 function settleColumns() {
+  let overflowed = false;
   for (let x = 0; x < COLS; x++) {
     let write = ROWS - 1;
-    // 枠の外に積み上がったぶんも一緒に落とす
     for (let y = ROWS - 1; y >= -PAD_ROWS; y--) {
-      if (board[y][x] !== EMPTY) {
-        board[write][x] = board[y][x];
-        chain[write][x] = chain[y][x];
-        chainWave[write][x] = chainWave[y][x];
-        fallAnim[write][x] = (write - y) + fallAnim[y][x];
-        fallVel[write][x] = fallVel[y][x];
-        if (write !== y) {
-          board[y][x] = EMPTY;
-          chain[y][x] = false; chainWave[y][x] = -1;
-          fallAnim[y][x] = 0; fallVel[y][x] = 0;
-        }
-        write--;
+      if (board[y][x] === EMPTY) continue;
+      if (write < 0) {
+        // 10行ぶんはもう埋まっている。これ以上は置き場が無いので削除する。
+        board[y][x] = EMPTY;
+        chain[y][x] = false; chainWave[y][x] = -1;
+        fallAnim[y][x] = 0; fallVel[y][x] = 0;
+        overflowed = true;
+        continue;
       }
+      board[write][x] = board[y][x];
+      chain[write][x] = chain[y][x];
+      chainWave[write][x] = chainWave[y][x];
+      fallAnim[write][x] = (write - y) + fallAnim[y][x];
+      fallVel[write][x] = fallVel[y][x];
+      if (write !== y) {
+        board[y][x] = EMPTY;
+        chain[y][x] = false; chainWave[y][x] = -1;
+        fallAnim[y][x] = 0; fallVel[y][x] = 0;
+      }
+      write--;
     }
     for (let y = write; y >= -PAD_ROWS; y--) {
       board[y][x] = EMPTY;
@@ -945,6 +966,7 @@ function settleColumns() {
       fallAnim[y][x] = 0; fallVel[y][x] = 0;
     }
   }
+  return overflowed;
 }
 
 // 落下オフセットを重力で 0 へ戻す。1マスで約0.24秒、4マスで約0.49秒。
@@ -2648,7 +2670,9 @@ window.LUMINA = {
   get lockResets() { return lockResets; },
   lockConst() { return { delay: LOCK_DELAY, max: LOCK_RESET_MAX }; },
   gravityMs() { return gravityInterval(); },
-  // 枠の外（待機エリア）に積み上がっているセル数を上の行から順に返す
+  // 枠の外（待機エリア）に残っているセル数を上の行から順に返す。
+  // settleColumns() が毎回はみ出し分を削除するので、ロック直後は常に [0, 0]。
+  // 主にテスト用（削除漏れがないことの確認）。
   overflow() {
     const out = [];
     for (let y = -PAD_ROWS; y < 0; y++)

@@ -139,8 +139,8 @@ body {
      レールは「指で押せる幅」を先に確保し、盤面は残った幅に収める。
      縦長寄りの端末では盤面が相対的に横へ広がるが、
      ボタンが押せなくなるよりはそちらを優先する。 */
-  --rail-l: clamp(128px, 13vw, 180px);
-  --rail-r: clamp(140px, 16vw, 244px);
+  --rail-l: clamp(140px, 15vw, 190px);
+  --rail-r: clamp(150px, 17vw, 244px);
   --cell: min(6.3dvh, calc((100vw - var(--rail-l) - var(--rail-r) - 18px) / 16));
   --board-w: calc(var(--cell) * 16);
   --board-h: calc(var(--cell) * 10);      /* 枠の中は10行。待機2行は枠の上へはみ出す */
@@ -1058,20 +1058,24 @@ kbd {
 .tbtn-a, .tbtn-b { white-space: nowrap; letter-spacing: 0.02em;
                    font-size: clamp(9px, 1.9dvh, 15px); }
 .tbtn-b { color: var(--accent); }
-/* 参考画面の左右移動は「大きな半透明のシェブロン」。枠は付けない。 */
+/* 参考画面の左右移動は「大きな半透明のシェブロン」だが、枠が全く無いと
+   押せる範囲が目に見えず、境界を勘で押すことになって右ボタンだけ
+   狙いが外れやすくなる。薄い背景と縁を常時つけて、押せる範囲そのものを
+   見せる（押した瞬間だけ変わる従来の見た目はそのまま強調表示に残す）。 */
 .mbtn {
   flex: 1 1 0;
-  min-width: 48px;
+  min-width: 56px;
   min-height: clamp(72px, 18dvh, 130px);
   font-size: clamp(28px, 8dvh, 72px);
   font-weight: 200;
   color: rgba(190, 232, 255, 0.72);
-  background: none;
-  border: 0;
-  border-radius: 0;
+  background: rgba(120, 200, 255, 0.07);
+  border: 1px solid rgba(120, 200, 255, 0.16);
+  border-radius: 6px;
   text-shadow: 0 0 18px rgba(120, 200, 255, 0.55);
 }
-.mbtn:active { background: none; color: #fff; transform: scale(0.94); }
+.mbtn:active { background: rgba(120, 200, 255, 0.28); color: #fff;
+               border-color: rgba(160, 220, 255, 0.5); transform: scale(0.96); }
 /* PC でも同じ画面にする（作者の指示）。マウスでも押せるので消さない。
    代わりにゲームパッドの欄を PC のときだけ足す。 */
 @media (hover: hover) and (pointer: fine) {
@@ -1109,12 +1113,40 @@ kbd {
 .tut-body { margin-top: 3px; font-size: clamp(8px, 1.5dvh, 13px); line-height: 1.45; }
 .tut-goal { margin-top: 4px; font-size: clamp(8px, 1.5dvh, 13px); }
 
+/* ===== タッチ端末の HUD: ラベルと数字を横1列に =====
+   縦積み（ラベル行 → 数字行）だと、合計の高さが HUD の取り分（5等分）を
+   実測でどの横持ちサイズでも超えてしまい、overflow:hidden で数字の下側
+   が常に数px 欠けていた（iPhone SE で5.3px、iPhone 15 Pro Max でも3.2px）。
+   1行に収めれば必要な高さがほぼ半分になり、この取り分に確実に収まる。 */
+@media (pointer: coarse) {
+  .hud .stat {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .hud .stat-label {
+    flex: 0 1 auto;
+    padding: 2px 6px;
+    font-size: clamp(7px, 4.6cqh, 11px);
+    white-space: nowrap;
+  }
+  .hud .stat-value {
+    flex: 0 1 auto;
+    padding: 0 4px 0 0;
+    font-size: clamp(13px, 9.5cqh, 22px);
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: clip;
+  }
+  .stat-icon, .stat-chev { display: none; }   /* 1行レイアウトでは重ねる余地が無い */
+}
+
 /* ===== 縦が短い横持ち端末（iPhone SE など 400pt 未満） =====
    操作ボタンの実寸を優先し、情報のほうを詰める。 */
 @media (pointer: coarse) and (max-height: 400px) {
   .hud { gap: 0; }
-  .hud .stat-label { padding: 0 5px; font-size: 7.5px; letter-spacing: 0.08em; }
-  .hud .stat-value { font-size: 14px; line-height: 1.05; padding-bottom: 0; }
   .hud .stat-sub, .hud .level-bar { display: none; }
   .burst-wrap { padding-top: 0; gap: 1px; }
   .burst-ready, .slow-left { font-size: 7px; }
