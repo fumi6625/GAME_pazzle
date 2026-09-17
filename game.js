@@ -14,7 +14,7 @@
 // このファイル自体（や index.html）が実機でキャッシュされて更新が届かない
 // 事故が何度も起きたため、目視で「今どの版を見ているか」が一発で分かる印。
 // 中身を直したら、index.html の ?v= と一緒にここも上げる。
-window.__BUILD__ = "game.js v13 / 2026-09-17";
+window.__BUILD__ = "game.js v14 / 2026-09-17";
 
 // ===== 定数 =====
 const COLS = 16;
@@ -808,21 +808,16 @@ function spawnPiece() {
   const startX = Math.floor(COLS / 2) - 1;
   // 盤面の枠外（待機エリア）に出す。参考動画のとおり、
   // 落ちる前のコマは盤面の外で待ち、そこで置き場所を決める。
+  // 出現位置がたまたま満杯でも、待機中に左右へ動かして逃げられるので、
+  // ここではゲームオーバーを判定しない。判定は実際に置く瞬間
+  // （lockPiece()）だけで行う——待機時間を過ぎてなお置き場の無い列へ
+  // 落ちた時に初めて詰みとする。
   current = { x: startX, y: -PAD_ROWS, cells: nextQueue.shift() };
   lockTimer = 0; lockResets = 0; lockLowest = -99;
   holdTimer = holdMs();
   while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   seqPos = (seqPos + 1) % SEQ_LEN;
   drawNext();
-  // ゲームオーバーは「盤面の row 0（最上段）が横一列すべて埋まっている」
-  // 時だけ。本家ルミネスでは、落下待機中のコマは待機時間のあいだ左右に
-  // 動かせるので、出現位置（中央2列）がたまたま満杯でも、そこから
-  // 空いている列へ寄せられればゲームオーバーにならない。
-  // 出現位置の2列だけで判定すると、この「寄せて逃げる」余地を奪って
-  // しまう。row 0 のどこか1マスでも空いていれば、そこへ寄せれば
-  // 少なくとも1マスぶんは置け、はみ出したぶんは lockPiece() が
-  // 削除するだけで済むので、置き場が完全に無くなったとは言えない。
-  if (board[0].every((v) => v !== EMPTY)) endGame();
 }
 
 // ===== 衝突判定 =====
@@ -907,11 +902,17 @@ function stepDown() {
 
 // ===== 固定 =====
 function lockPiece() {
+  // 置く前の時点で、この列がすでに最上段(row 0)まで埋まっているか。
+  // 待機中は左右に動かして逃げられるので、ここで見るのは「結局この列へ
+  // 落とした（または待機時間切れでここへ落ちた）」という、置く瞬間の
+  // 状態だけでよい。片方の列だけ満杯でも、置いた瞬間にそちらへ触れて
+  // いれば置き場が無いということなので対象にする（左右どちらの列でも
+  // 同じ基準）。
+  const noRoom = board[0][current.x] !== EMPTY || board[0][current.x + 1] !== EMPTY;
+
   for (let r = 0; r < 2; r++) {
     for (let c = 0; c < 2; c++) {
       const bx = current.x + c, by = current.y + r;
-      // 枠の外（待機エリア）にも積める。次のコマが置けなくなった時点で
-      // spawnPiece() がゲームオーバーにする。
       board[by][bx] = current.cells[r][c];
       const ch = current.cells.chain;
       chain[by][bx] = !!(ch && ch[0] === r && ch[1] === c);
@@ -924,11 +925,18 @@ function lockPiece() {
   Effects.burst(cx, cy + CELL * 0.4, "rgba(180,200,255,0.8)", 5, 0.4);
   current = null;
   const overflowed = settleColumns();
-  // 枠外にはみ出たぶんは削除するだけで、ゲームオーバーにはしない。
-  // 盤面のごく一部（今置いた列）が頭打ちになっただけで、他の列に
-  // まだ余裕があることのほうが多いため。警告として軽く光らせるだけに留め、
-  // ゲームオーバーの判定は spawnPiece() 側で「次のコマの出現位置(row 0)
-  // そのものが埋まっているか」を見て行う。
+  if (noRoom) {
+    // 置き場が無い列へ、待機時間を過ぎて（または自分で）落とした。
+    // はみ出したぶんはすでに削除済みだが、ここはゲームオーバーにする。
+    Effects.screenFlash(0.6);
+    Effects.screenShake(10);
+    Effects.zone(0, padY(), COLS * CELL, CELL, "rgba(255,80,80,0.35)");
+    endGame();
+    return;
+  }
+  // 満杯ではない列にはみ出しが起きた場合（＝置いた列は元々1段ぶん
+  // 余裕があったが、コマの2段ぶんには足りなかった場合）は、削除する
+  // だけでゲームオーバーにはしない。盤面の他の場所にはまだ余裕がある。
   if (overflowed) {
     Effects.screenFlash(0.3);
     Effects.zone(0, padY(), COLS * CELL, CELL, "rgba(255,150,80,0.28)");
