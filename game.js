@@ -11,6 +11,11 @@
  *  - コンボ・盤面の高さに応じて BGM のレイヤーが増減（ダイナミックミュージック）
  */
 
+// このファイル自体（や index.html）が実機でキャッシュされて更新が届かない
+// 事故が何度も起きたため、目視で「今どの版を見ているか」が一発で分かる印。
+// 中身を直したら、index.html の ?v= と一緒にここも上げる。
+window.__BUILD__ = "game.js v9 / 2026-09-17";
+
 // ===== 定数 =====
 const COLS = 16;
 const ROWS = 10;
@@ -2580,17 +2585,10 @@ gestureTargets.forEach((el) => {
     function renderEnv() {
       const mq = (q) => (window.matchMedia ? window.matchMedia(q).matches : "n/a");
       const lines = [
-        "UA: " + navigator.userAgent,
-        "画面(CSS px): " + window.innerWidth + "x" + window.innerHeight,
-        "DPR: " + window.devicePixelRatio,
-        "pointer:coarse " + mq("(pointer: coarse)")
-          + " / fine " + mq("(pointer: fine)"),
-        "hover:hover " + mq("(hover: hover)") + " / none " + mq("(hover: none)"),
-        "orientation:portrait " + mq("(orientation: portrait)"),
-        "maxTouchPoints: " + navigator.maxTouchPoints,
-        "ontouchstart: " + ("ontouchstart" in window),
-        "has-touch クラス: " + document.documentElement.classList.contains("has-touch"),
+        "★ページの版: " + (window.__BUILD__ || "(不明・かなり古い版の可能性)"),
       ];
+      // ここを一番上に出す。UA が長くてスクロールしないと見えない、
+      // という事故が一度あったため。
       const rail = document.querySelector(".rail-left");
       const right = document.querySelector('[data-act="right"]');
       const board = document.getElementById("board");
@@ -2598,13 +2596,25 @@ gestureTargets.forEach((el) => {
         const rr = rail.getBoundingClientRect();
         const br = right.getBoundingClientRect();
         const bo = board.getBoundingClientRect();
-        lines.push("---");
         lines.push(`rail-left: x=${rr.x.toFixed(0)} w=${rr.width.toFixed(0)}`);
         lines.push(`右移動btn: x=${br.x.toFixed(0)} w=${br.width.toFixed(0)} `
           + `右端=${br.right.toFixed(0)}`);
         lines.push(`盤面: x=${bo.x.toFixed(0)} `
           + `(ボタンとの隙間=${(bo.x - br.right).toFixed(0)}px)`);
+      } else {
+        lines.push("★ボタン/盤面の要素が見つからない（古いHTMLの可能性）");
       }
+      lines.push("---");
+      lines.push("画面(CSS px): " + window.innerWidth + "x" + window.innerHeight);
+      lines.push("DPR: " + window.devicePixelRatio);
+      lines.push("pointer:coarse " + mq("(pointer: coarse)")
+        + " / fine " + mq("(pointer: fine)"));
+      lines.push("hover:hover " + mq("(hover: hover)") + " / none " + mq("(hover: none)"));
+      lines.push("orientation:portrait " + mq("(orientation: portrait)"));
+      lines.push("maxTouchPoints: " + navigator.maxTouchPoints);
+      lines.push("ontouchstart: " + ("ontouchstart" in window));
+      lines.push("has-touch クラス: " + document.documentElement.classList.contains("has-touch"));
+      lines.push("UA: " + navigator.userAgent);
       envEl.textContent = lines.join("\n");
     }
 

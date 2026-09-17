@@ -6,12 +6,24 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#04050a" />
+  <!-- index.html 自体がキャッシュされると、下の style.css/game.js の
+       ?v= をいくら上げても意味が無い（ブラウザは「この HTML が指している
+       ?v=6」を見て、その番号のファイルをキャッシュから返すだけで、
+       新しい index.html を取りに行かない）。実機で「右移動ボタンが
+       まったく直っていない」報告の実際の原因がこれだった
+       （診断パネルのログで確認: ボタンの見た目の位置をタップしているのに
+       .main が反応していた＝古いCSS構造のまま）。
+       特に「ホーム画面に追加」した状態は、この種のキャッシュがいちばん
+       残りやすい。HTML自体を毎回取り直させる。 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>LUMINA ARISE — ルミナス風パズル</title>
   <!-- style.css / game.js などは版番号を持たないファイル名で読み込んでいたため、
        一度でも遊んだ端末はブラウザのキャッシュから古い CSS/JS を出し続けていた
        （音楽ファイルで実際に踏んだのと同じ罠。tools/*.js の ASSET_VER と同じ考え方）。
        内容を直したら、その都度ここの ?v= を上げること。 -->
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=9" />
   <script>
     // CSS の pointer:coarse は「デスクトップ用サイトを表示」等で
     // 実機でも fine と誤判定されることがある。実際に触れる端末かどうかは
@@ -237,6 +249,6 @@
   <script src="sfx-assets.js?v=1"></script>
   <script src="effects.js?v=4"></script>
   <script src="audio.js?v=3"></script>
-  <script src="game.js?v=8"></script>
+  <script src="game.js?v=9"></script>
 </body>
 </html>
