@@ -11,7 +11,18 @@
        一度でも遊んだ端末はブラウザのキャッシュから古い CSS/JS を出し続けていた
        （音楽ファイルで実際に踏んだのと同じ罠。tools/*.js の ASSET_VER と同じ考え方）。
        内容を直したら、その都度ここの ?v= を上げること。 -->
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
+  <script>
+    // CSS の pointer:coarse は「デスクトップ用サイトを表示」等で
+    // 実機でも fine と誤判定されることがある。実際に触れる端末かどうかは
+    // JS の機能検出のほうが確実なので、html に印を付けて CSS 側の保険にする
+    // （style.css の html.has-touch ルールを参照）。
+    (function () {
+      if ("ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0) {
+        document.documentElement.classList.add("has-touch");
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="stage">
@@ -30,6 +41,25 @@
     <!-- 背景（ビート連動 / 夜のメトロポリス × ワイヤーフレーム） -->
     <canvas id="bg" class="bg-canvas"></canvas>
     <div class="vignette" aria-hidden="true"></div>
+
+    <!-- ===== 一時的な診断パネル =====
+         右移動ボタンの不具合がこちらの環境では再現しないため、
+         実機で何が起きているかをその場で見えるようにする。
+         右下の小さな虫アイコンをタップすると開く。原因が分かったら
+         このブロックごと削除してよい。 -->
+    <button id="debug-toggle" class="debug-toggle" aria-label="診断パネル">🐞</button>
+    <div id="debug-panel" class="debug-panel hidden">
+      <div class="debug-head">
+        <span>診断パネル</span>
+        <button id="debug-close" class="debug-close">✕</button>
+      </div>
+      <pre id="debug-env" class="debug-env"></pre>
+      <div class="debug-log-head">
+        <span>タップの記録（新しい順）</span>
+        <button id="debug-clear" class="debug-clear">クリア</button>
+      </div>
+      <pre id="debug-log" class="debug-log"></pre>
+    </div>
 
     <div class="game-area">
       <div class="layout">
@@ -205,8 +235,8 @@
   </div>
 
   <script src="sfx-assets.js?v=1"></script>
-  <script src="effects.js?v=3"></script>
+  <script src="effects.js?v=4"></script>
   <script src="audio.js?v=3"></script>
-  <script src="game.js?v=7"></script>
+  <script src="game.js?v=8"></script>
 </body>
 </html>

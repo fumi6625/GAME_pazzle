@@ -2559,6 +2559,95 @@ gestureTargets.forEach((el) => {
   document.addEventListener("pointercancel", release);
 }
 
+// ===== 一時的な診断パネル =====
+// 右移動ボタンの不具合がこちらの環境では再現しないため、実機で
+// 何が起きているかをその場のログで見られるようにする。
+// 既存のボタン処理（上のブロック）には一切手を入れず、キャプチャ段階の
+// pointerdown を別途拾って記録するだけ。原因が分かったらこのブロックと
+// index.html の #debug-toggle/#debug-panel、style.css の .debug-* を
+// まとめて削除してよい。
+{
+  const envEl = document.getElementById("debug-env");
+  const logEl = document.getElementById("debug-log");
+  const panel = document.getElementById("debug-panel");
+  const toggleBtn = document.getElementById("debug-toggle");
+  const closeBtn = document.getElementById("debug-close");
+  const clearBtn = document.getElementById("debug-clear");
+  if (envEl && logEl && panel && toggleBtn) {
+    const entries = [];
+    const MAX_ENTRIES = 30;
+
+    function renderEnv() {
+      const mq = (q) => (window.matchMedia ? window.matchMedia(q).matches : "n/a");
+      const lines = [
+        "UA: " + navigator.userAgent,
+        "画面(CSS px): " + window.innerWidth + "x" + window.innerHeight,
+        "DPR: " + window.devicePixelRatio,
+        "pointer:coarse " + mq("(pointer: coarse)")
+          + " / fine " + mq("(pointer: fine)"),
+        "hover:hover " + mq("(hover: hover)") + " / none " + mq("(hover: none)"),
+        "orientation:portrait " + mq("(orientation: portrait)"),
+        "maxTouchPoints: " + navigator.maxTouchPoints,
+        "ontouchstart: " + ("ontouchstart" in window),
+        "has-touch クラス: " + document.documentElement.classList.contains("has-touch"),
+      ];
+      const rail = document.querySelector(".rail-left");
+      const right = document.querySelector('[data-act="right"]');
+      const board = document.getElementById("board");
+      if (rail && right && board) {
+        const rr = rail.getBoundingClientRect();
+        const br = right.getBoundingClientRect();
+        const bo = board.getBoundingClientRect();
+        lines.push("---");
+        lines.push(`rail-left: x=${rr.x.toFixed(0)} w=${rr.width.toFixed(0)}`);
+        lines.push(`右移動btn: x=${br.x.toFixed(0)} w=${br.width.toFixed(0)} `
+          + `右端=${br.right.toFixed(0)}`);
+        lines.push(`盤面: x=${bo.x.toFixed(0)} `
+          + `(ボタンとの隙間=${(bo.x - br.right).toFixed(0)}px)`);
+      }
+      envEl.textContent = lines.join("\n");
+    }
+
+    function renderLog() {
+      if (!entries.length) { logEl.textContent = "（まだ記録なし）"; return; }
+      logEl.textContent = entries.slice().reverse().map((e) => {
+        return `[${e.t}] act=${e.act ?? "(なし)"} target=${e.target}\n`
+          + `  座標=(${e.x},${e.y}) x移動: ${e.beforeX} → ${e.afterX} `
+          + `(${e.moved ? "動いた" : "動かず"})`;
+      }).join("\n\n");
+    }
+
+    // キャプチャ段階で拾うので、既存のボタン処理より必ず先に自分の分を記録できる。
+    document.addEventListener("pointerdown", (e) => {
+      const btn = e.target.closest && e.target.closest(".tbtn, .mbtn");
+      const act = btn ? btn.getAttribute("data-act") : null;
+      const beforeX = current ? current.x : null;
+      const entry = {
+        t: new Date().toLocaleTimeString("ja-JP", { hour12: false }) + "."
+          + String(performance.now() | 0).slice(-3),
+        act, target: e.target.tagName + (e.target.className ? "." + e.target.className : ""),
+        x: Math.round(e.clientX), y: Math.round(e.clientY),
+        beforeX, afterX: beforeX, moved: false,
+      };
+      entries.push(entry);
+      if (entries.length > MAX_ENTRIES) entries.shift();
+      // 実際のボタン処理（バブル段階）が終わった後の x を見て、本当に動いたか確認する
+      setTimeout(() => {
+        entry.afterX = current ? current.x : null;
+        entry.moved = entry.beforeX !== entry.afterX;
+        if (panel && !panel.classList.contains("hidden")) renderLog();
+      }, 0);
+    }, true);
+
+    toggleBtn.addEventListener("click", () => {
+      panel.classList.toggle("hidden");
+      if (!panel.classList.contains("hidden")) { renderEnv(); renderLog(); }
+    });
+    if (closeBtn) closeBtn.addEventListener("click", () => panel.classList.add("hidden"));
+    if (clearBtn) clearBtn.addEventListener("click", () => { entries.length = 0; renderLog(); });
+  }
+}
+
 // ===== 入力 =====
 document.addEventListener("keydown", (e) => {
   // 設定画面はゲームの状態に関係なく開閉できる

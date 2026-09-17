@@ -1123,6 +1123,90 @@ kbd {
 @media (pointer: coarse) and (orientation: portrait) {
   .rotate-hint { display: flex; }
 }
+@media (orientation: portrait) {
+  /* pointer:coarse の誤判定対策（上と同じ内容。index.html 参照） */
+  html.has-touch .rotate-hint { display: flex; }
+}
+
+/* ===== 一時的な診断パネル =====
+   不具合が実機でしか再現しないため、その場で環境情報とタップの記録を
+   見られるようにする。原因が分かったら丸ごと削除してよい。 */
+.debug-toggle {
+  position: fixed;
+  right: 6px;
+  bottom: 6px;
+  z-index: 998;
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+.debug-panel {
+  position: fixed;
+  right: 6px;
+  bottom: 42px;
+  z-index: 999;
+  width: min(420px, calc(100vw - 12px));
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(4, 6, 14, 0.94);
+  border: 1px solid rgba(120, 200, 255, 0.4);
+  border-radius: 8px;
+  padding: 8px;
+  font-family: var(--num);
+  font-size: 11px;
+  color: #cfe6ff;
+  overflow: hidden;
+}
+.debug-panel.hidden { display: none; }
+.debug-head, .debug-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--ui);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #fff;
+  margin-bottom: 4px;
+}
+.debug-log-head { margin-top: 8px; color: var(--muted); }
+.debug-close, .debug-clear {
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: inherit;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.debug-env {
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 0;
+  max-height: 30%;
+  overflow-y: auto;
+}
+.debug-log {
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 
 /* ===== チュートリアルの説明パネル（新レイアウト用） =====
    3列レイアウトでは中央カラムに縦の余白がないので、盤面の下端へ重ねる。
@@ -1176,6 +1260,30 @@ kbd {
   }
   .stat-icon, .stat-chev { display: none; }   /* 1行レイアウトでは重ねる余地が無い */
 }
+/* 上と全く同じ内容を html.has-touch でも掛ける。CSS の pointer:coarse が
+   実機で fine と誤判定された場合の保険（index.html の検出スクリプト参照）。 */
+html.has-touch .hud .stat {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+html.has-touch .hud .stat-label {
+  flex: 0 1 auto;
+  padding: 2px 6px;
+  font-size: clamp(7px, 4.6cqh, 11px);
+  white-space: nowrap;
+}
+html.has-touch .hud .stat-value {
+  flex: 0 1 auto;
+  padding: 0 4px 0 0;
+  font-size: clamp(13px, 9.5cqh, 22px);
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: clip;
+}
+html.has-touch .stat-icon, html.has-touch .stat-chev { display: none; }
 
 /* ===== 縦が短い横持ち端末（iPhone SE など 400pt 未満） =====
    操作ボタンの実寸を優先し、情報のほうを詰める。 */
@@ -1202,6 +1310,25 @@ kbd {
   }
   .board-top { height: 27cqh; }
 }
+/* ===== pointer:fine / hover:hover の誤判定対策 =====
+   「デスクトップ用サイトを表示」等で実機でも fine/hover と誤判定される
+   ことがある。JS で実際にタッチ対応と分かっていれば（index.html の
+   検出スクリプトが html.has-touch を付ける）、上の PC 用の寸法を
+   タッチ用へ強制的に戻す。セレクタの詳細度が高いので @media の中身より
+   必ず勝つ（!important 不要）。 */
+html.has-touch .game-area {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  margin: 0;
+}
+html.has-touch .layout {
+  --rail-l: clamp(140px, 15vw, 190px);
+  --rail-r: clamp(150px, 17vw, 244px);
+  --cell: min(6.3dvh, calc((100vw - var(--rail-l) - var(--rail-r) - 18px) / 16));
+}
+html.has-touch .board-top { height: 27dvh; }
+html.has-touch .deskinfo { display: none; }
 
 /* 縦に余裕がある画面でだけ、レベルの補助表示を出す */
 @media (min-height: 620px) {

@@ -731,15 +731,19 @@ const Effects = (() => {
     }
 
     // --- 5) 大きなシルエット。1枚絵としての「主役」を作る ---
+    // 左右のシルエットは、左右移動ボタン（左レール）・回転/BURSTボタン
+    // （右レール）の真後ろに来ないよう、レールの外側（盤面寄り）へ寄せてある。
+    // 元は w*0.30 / w*0.74 で、レール幅（画面の1〜2割）にちょうど重なり、
+    // 「ボタンの後ろだけ一段暗い」ように見えて誤操作の原因と誤認されていた。
     ctx.globalCompositeOperation = "source-over";
     const silh = S.silh || S.ink;
     ctx.fillStyle = rgba(silh, 0.55);
     const bob = Math.sin(t * 0.35) * h * 0.012;
     ctx.beginPath();
-    ctx.ellipse(w * 0.30, h * 0.72 + bob, w * 0.20, h * 0.30, -0.25, 0, TAU);
+    ctx.ellipse(w * 0.46, h * 0.72 + bob, w * 0.17, h * 0.30, -0.25, 0, TAU);
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(w * 0.74, h * 0.78 - bob, w * 0.17, h * 0.26, 0.3, 0, TAU);
+    ctx.ellipse(w * 0.62, h * 0.78 - bob, w * 0.15, h * 0.26, 0.3, 0, TAU);
     ctx.fill();
     ctx.beginPath();
     ctx.ellipse(w * 0.5, h * 1.02, w * 0.44, h * 0.22, 0, 0, TAU);
