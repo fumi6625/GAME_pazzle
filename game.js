@@ -14,7 +14,7 @@
 // このファイル自体（や index.html）が実機でキャッシュされて更新が届かない
 // 事故が何度も起きたため、目視で「今どの版を見ているか」が一発で分かる印。
 // 中身を直したら、index.html の ?v= と一緒にここも上げる。
-window.__BUILD__ = "game.js v11 / 2026-09-17";
+window.__BUILD__ = "game.js v12 / 2026-09-17";
 
 // ===== 定数 =====
 const COLS = 16;
@@ -814,9 +814,12 @@ function spawnPiece() {
   while (nextQueue.length < NEXT_VIEW) nextQueue.push(randomCells());
   seqPos = (seqPos + 1) % SEQ_LEN;
   drawNext();
-  // ゲームオーバーは lockPiece() 側で判定する（枠に収まらないコマを
-  // 置いたとき＝はみ出しが起きたとき）。spawnPiece() の時点では
-  // 枠外は必ず空いているので、ここでの衝突判定は不要。
+  // ゲームオーバーは「次のコマの出現位置（row 0 の中央2列）そのものが
+  // すでに埋まっている」時だけ。個別の列がはみ出して頭打ちになった
+  // だけでは終わらせない（lockPiece() 側は削除するだけで済ませている）。
+  // 枠外（隠し行）は settleColumns() が常に空にするので、ここでは
+  // 実在の row 0 だけを見ればよい。
+  if (board[0][startX] !== EMPTY || board[0][startX + 1] !== EMPTY) endGame();
 }
 
 // ===== 衝突判定 =====
@@ -918,14 +921,14 @@ function lockPiece() {
   Effects.burst(cx, cy + CELL * 0.4, "rgba(180,200,255,0.8)", 5, 0.4);
   current = null;
   const overflowed = settleColumns();
-  // 枠外にはみ出た＝最上段まで積み上がった状態で、さらにコマを置いた。
-  // ここでゲームオーバーにする（はみ出した分はすでに settleColumns() が削除済み）。
+  // 枠外にはみ出たぶんは削除するだけで、ゲームオーバーにはしない。
+  // 盤面のごく一部（今置いた列）が頭打ちになっただけで、他の列に
+  // まだ余裕があることのほうが多いため。警告として軽く光らせるだけに留め、
+  // ゲームオーバーの判定は spawnPiece() 側で「次のコマの出現位置(row 0)
+  // そのものが埋まっているか」を見て行う。
   if (overflowed) {
-    Effects.screenFlash(0.6);
-    Effects.screenShake(10);
-    Effects.zone(0, padY(), COLS * CELL, CELL, "rgba(255,80,80,0.35)");
-    endGame();
-    return;
+    Effects.screenFlash(0.3);
+    Effects.zone(0, padY(), COLS * CELL, CELL, "rgba(255,150,80,0.28)");
   }
   const had = markMatches();
   if (had) GameAudio.playSquare();
