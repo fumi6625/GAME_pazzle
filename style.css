@@ -1063,6 +1063,10 @@ kbd {
    狙いが外れやすくなる。薄い背景と縁を常時つけて、押せる範囲そのものを
    見せる（押した瞬間だけ変わる従来の見た目はそのまま強調表示に残す）。 */
 .mbtn {
+  position: relative;   /* ::after の hit-slop をこの箱基準で広げるために必要 */
+  z-index: 5;            /* 隣の .main（盤面側）より後に描かれるので、
+                             これが無いと ::after の広げた分が .main の
+                             下に埋もれて拾われない（実測で確認済み） */
   flex: 1 1 0;
   min-width: 56px;
   min-height: clamp(72px, 18dvh, 130px);
@@ -1076,6 +1080,20 @@ kbd {
 }
 .mbtn:active { background: rgba(120, 200, 255, 0.28); color: #fff;
                border-color: rgba(160, 220, 255, 0.5); transform: scale(0.96); }
+/* 実機での診断で判明: ボタンの見た目の枠は正しく反応するが、実際の指の
+   タップは見た目の枠から 30px 前後ずれることが普通にある（同じ「右移動」
+   を狙った2回のタップで、x=128（成功）と x=159（外れて盤面に当たった）
+   の差が実測30px あった）。見た目の大きさは変えず、当たり判定だけを
+   透明な ::after で外側へ大きく広げ、多少ずれても拾えるようにする。
+   内側（2つのボタンの間）だけは広げすぎると逆転するので控えめにする。 */
+.mbtn::after {
+  content: "";
+  position: absolute;
+  top: -14px;
+  bottom: -14px;
+}
+[data-act="left"].mbtn::after { left: -28px; right: -4px; }
+[data-act="right"].mbtn::after { left: -4px; right: -40px; }
 /* PC でも同じ画面にする（作者の指示）。マウスでも押せるので消さない。
    代わりにゲームパッドの欄を PC のときだけ足す。 */
 @media (hover: hover) and (pointer: fine) {
