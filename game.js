@@ -2000,6 +2000,22 @@ function resizeBg() {
 }
 window.addEventListener("resize", resizeBg);
 
+// ===== 縦持ちタッチ端末: 回転をお願いする画面の間は進行を止める =====
+// 表示/非表示自体は CSS だけで切り替わるが、進行(重力・タイムライン)まで
+// 止めないと、回転している間にコマが積み上がったりゲームオーバーに
+// なったりする。回転してこちらが出したポーズだけ、戻ったら自動で解除する。
+const rotateGate = window.matchMedia("(pointer: coarse) and (orientation: portrait)");
+let pausedByRotate = false;
+function applyRotateGate() {
+  if (rotateGate.matches) {
+    if (running && !gameOver && !paused) { paused = true; pausedByRotate = true; }
+  } else if (pausedByRotate) {
+    paused = false; pausedByRotate = false;
+  }
+}
+rotateGate.addEventListener("change", applyRotateGate);
+window.addEventListener("resize", applyRotateGate);
+
 // ===== ループ =====
 let qAcc = 0, qFrames = 0, quality = 1;
 function autoQuality(dt) {

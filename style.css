@@ -1081,13 +1081,47 @@ kbd {
 @media (hover: hover) and (pointer: fine) {
   .deskinfo { display: block; flex: 0 0 auto; }
 }
-/* 縦持ちは3列だと盤面が小さくなりすぎるので、横向きを促す */
-@media (orientation: portrait) and (max-width: 860px) {
-  .layout { --cell: clamp(12px, min(2.2dvh, 4.6vw), 30px); }
-  .rail-left  { --rail-l: clamp(56px, 16vw, 110px); width: var(--rail-l); }
-  .rail-right { --rail-r: clamp(84px, 24vw, 150px); width: var(--rail-r); }
-  .mascot { display: none; }
-  .track-line { font-size: 8px; }
+/* ===== 縦持ちのタッチ端末: 遊ばせず、回転をお願いする =====
+   3列レイアウトはレールの幅を絶対px（ボタンの実寸）で確保する作りなので、
+   縦持ちの狭い画面だとレールがボタンの min-width より細くなり、
+   ボタンがレールからはみ出して盤面の上に重なる
+   （実測: iPhone 13 縦持ちで右移動ボタンが盤面の内側まで飛び出し、
+   タップしても盤面側のジェスチャー判定に奪われて反応しなくなっていた）。
+   中途半端に詰めるのではなく、回転をお願いする画面で覆ってしまう。 */
+.rotate-hint {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  align-items: center;
+  justify-content: center;
+  background: #04050a;
+  color: var(--text);
+  text-align: center;
+  padding: 24px;
+}
+.rotate-icon {
+  font-size: 56px;
+  animation: rotate-hint-spin 1.6s ease-in-out infinite;
+}
+.rotate-text {
+  margin-top: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+.rotate-sub {
+  margin-top: 6px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+@keyframes rotate-hint-spin {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-90deg); }
+}
+@media (pointer: coarse) and (orientation: portrait) {
+  .rotate-hint { display: flex; }
 }
 
 /* ===== チュートリアルの説明パネル（新レイアウト用） =====
