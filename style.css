@@ -43,7 +43,13 @@ body {
 .stage {
   position: relative;
   width: 100%;
-  height: 100vh;
+  /* .game-area 側は 100dvh（実際に見えている高さに追従）を使っているのに
+     ここだけ 100vh（iOS Safari ではツールバーが出ていても「隠れた時の
+     最大の高さ」を返す、実際より大きくなりがちな値）のままだと、
+     ツールバーが出ている間は .stage の方が高くなり、align-items:center
+     で挟まれた .game-area の上に隙間ができる（実機で確認した黒帯の
+     不具合）。両方 dvh に揃える。 */
+  height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1254,6 +1260,12 @@ kbd {
    実測でどの横持ちサイズでも超えてしまい、overflow:hidden で数字の下側
    が常に数px 欠けていた（iPhone SE で5.3px、iPhone 15 Pro Max でも3.2px）。
    1行に収めれば必要な高さがほぼ半分になり、この取り分に確実に収まる。 */
+/* 実機で確認された不具合: container-type:size を使う cqh 系の単位が、
+   一部の環境（実機の Safari で確認）で正しく確立されず、font-size の
+   clamp() 全体が無効値扱いになって、数字が異常に大きく・重なって
+   描画される事故が起きた（LEVEL/TIME/SCORE… が全部同じ場所に潰れて
+   見えた）。container query は完全に信頼できないと判断し、ここから下は
+   すべて dvh（ビューポート基準、ずっと安定して動いている）に統一する。 */
 @media (pointer: coarse) {
   .hud .stat {
     display: flex;
@@ -1263,18 +1275,20 @@ kbd {
     gap: 6px;
   }
   .hud .stat-label {
-    flex: 0 1 auto;
+    flex: 1 1 auto;     /* HI-SCORE など長いラベル側から先に詰める。
+                            数字を削るより読みやすさが下がるほうがまし */
+    min-width: 0;
     padding: 2px 6px;
-    font-size: clamp(7px, 4.6cqh, 11px);
+    font-size: clamp(7px, 1.9dvh, 11px);
     white-space: nowrap;
-  }
-  .hud .stat-value {
-    flex: 0 1 auto;
-    padding: 0 4px 0 0;
-    font-size: clamp(13px, 9.5cqh, 22px);
-    line-height: 1;
     overflow: hidden;
     text-overflow: clip;
+  }
+  .hud .stat-value {
+    flex: 0 0 auto;      /* 数字側は絶対に削らない */
+    padding: 0 4px 0 0;
+    font-size: clamp(13px, 4dvh, 22px);
+    line-height: 1;
   }
   .stat-icon, .stat-chev { display: none; }   /* 1行レイアウトでは重ねる余地が無い */
 }
@@ -1288,18 +1302,19 @@ html.has-touch .hud .stat {
   gap: 6px;
 }
 html.has-touch .hud .stat-label {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 2px 6px;
-  font-size: clamp(7px, 4.6cqh, 11px);
+  font-size: clamp(7px, 1.9dvh, 11px);
   white-space: nowrap;
-}
-html.has-touch .hud .stat-value {
-  flex: 0 1 auto;
-  padding: 0 4px 0 0;
-  font-size: clamp(13px, 9.5cqh, 22px);
-  line-height: 1;
   overflow: hidden;
   text-overflow: clip;
+}
+html.has-touch .hud .stat-value {
+  flex: 0 0 auto;
+  padding: 0 4px 0 0;
+  font-size: clamp(13px, 4dvh, 22px);
+  line-height: 1;
 }
 html.has-touch .stat-icon, html.has-touch .stat-chev { display: none; }
 
